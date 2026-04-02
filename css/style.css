@@ -1,0 +1,368 @@
+:root {
+  --ui-font-size: 16px;
+  --bg: #071120;
+  --panel: rgba(12, 26, 49, 0.92);
+  --panel-border: rgba(131, 181, 255, 0.18);
+  --accent: #78b8ff;
+  --accent-strong: #d4ecff;
+  --danger: #ff7e7e;
+  --success: #8af0b0;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-size: var(--ui-font-size);
+  color: #eff6ff;
+  background:
+    radial-gradient(circle at top, rgba(77, 137, 255, 0.15), transparent 30%),
+    linear-gradient(180deg, #05101c, #08182c 55%, #09111d);
+}
+
+.page-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.app {
+  position: relative;
+  width: 1024px;
+  height: 768px;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(144, 192, 255, 0.18);
+  box-shadow: var(--shadow);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+    linear-gradient(180deg, #08192d, #06111f 60%, #050d18);
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.screen.active {
+  display: block;
+  opacity: 1;
+  transform: scale(1);
+}
+
+.screen-panel {
+  width: min(760px, calc(100% - 72px));
+  margin: 40px auto;
+  padding: 28px 32px;
+  border-radius: 28px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+}
+
+.start-panel,
+.end-panel {
+  min-height: calc(100% - 80px);
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: #9fc8ff;
+}
+
+.game-title {
+  margin: 0;
+  font-size: 2.5rem;
+  line-height: 1.05;
+  color: #f8fbff;
+  animation: titlePulse 2.6s ease-in-out infinite;
+}
+
+.subtitle,
+.end-summary,
+.end-extra {
+  color: #d7e9ff;
+}
+
+.instructions {
+  margin-top: 22px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(144, 192, 255, 0.12);
+}
+
+.instructions h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.instructions ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.instructions li {
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: fadeList 600ms ease forwards;
+  animation-delay: var(--delay);
+  margin-bottom: 10px;
+}
+
+.input-block {
+  display: grid;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.input-block span {
+  font-weight: 600;
+  color: #e8f1ff;
+}
+
+.input-block input {
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(143, 195, 255, 0.24);
+  background: rgba(5, 14, 28, 0.78);
+  color: #f6fbff;
+  outline: none;
+  font: inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.input-block input:focus {
+  border-color: rgba(120, 184, 255, 0.78);
+  box-shadow: 0 0 0 3px rgba(120, 184, 255, 0.15);
+}
+
+.start-actions,
+.end-actions {
+  margin-top: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.primary-btn,
+.icon-btn {
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 16px;
+  font: inherit;
+  color: #f8fbff;
+  cursor: pointer;
+  transition: transform 150ms ease, filter 150ms ease, background 150ms ease;
+}
+
+.primary-btn {
+  min-width: 186px;
+  background: linear-gradient(180deg, #67b6ff, #3579ff);
+  font-weight: 700;
+  box-shadow: 0 12px 22px rgba(53, 121, 255, 0.32);
+}
+
+.icon-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(153, 198, 255, 0.14);
+}
+
+.primary-btn:hover,
+.icon-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.07);
+}
+
+.primary-btn:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+  opacity: 0.62;
+}
+
+.inline-settings {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#game-screen {
+  background:
+    radial-gradient(circle at top, rgba(62, 100, 164, 0.16), transparent 25%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), transparent 16%),
+    linear-gradient(180deg, #07111d, #07131f);
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.hud-group {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.hud-group-center {
+  justify-content: center;
+}
+
+.hud-group-actions {
+  pointer-events: auto;
+}
+
+.hud-card {
+  min-width: 104px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(9, 20, 36, 0.84);
+  border: 1px solid rgba(147, 189, 255, 0.14);
+  backdrop-filter: blur(4px);
+}
+
+.timer-card {
+  min-width: 130px;
+}
+
+.hud-label {
+  display: block;
+  font-size: 0.78rem;
+  color: #a5c9ff;
+}
+
+.hud-value {
+  display: block;
+  margin-top: 2px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f6fbff;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 10, 20, 0.58);
+  z-index: 20;
+}
+
+.overlay.hidden,
+.rank-note.hidden {
+  display: none;
+}
+
+.overlay-card {
+  min-width: 320px;
+  padding: 28px;
+  border-radius: 24px;
+  background: rgba(8, 18, 34, 0.95);
+  border: 1px solid rgba(147, 189, 255, 0.15);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.overlay-card h2 {
+  margin-top: 0;
+}
+
+.overlay-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.leaderboard-wrap {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(144, 192, 255, 0.12);
+}
+
+.leaderboard {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.leaderboard th,
+.leaderboard td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(144, 192, 255, 0.1);
+}
+
+.leaderboard td:last-child,
+.leaderboard th:last-child {
+  text-align: right;
+}
+
+
+.leaderboard-row-own {
+  background: rgba(120, 184, 255, 0.12);
+}
+
+.leaderboard-row-own td {
+  font-weight: 700;
+}
+
+.rank-note {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(120, 184, 255, 0.12);
+  color: #ecf6ff;
+}
+
+@keyframes fadeList {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes titlePulse {
+  0%,
+  100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@media (max-width: 1100px) {
+  .page-shell {
+    overflow: auto;
+    place-items: start center;
+  }
+}
