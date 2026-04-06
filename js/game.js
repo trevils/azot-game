@@ -4,6 +4,7 @@
   const HUD_HEIGHT = 86;
   const WORLD_TOP = HUD_HEIGHT;
   const FLOOR_Y = 704;
+  const GRAVITY = 1500;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -37,19 +38,25 @@
     this.testMode = false;
     this.score = 0;
     this.timeLeft = 90;
+    this.runTime = 0;
+    this.orderSpawnTimer = 0;
+    this.cartSpawnTimer = 0;
+    this.cartCounter = 0;
+
     this.input = {
       left: false,
       right: false,
       jumpQueued: false
     };
+
     this.flashTimer = 0;
     this.statusText = '';
     this.statusTimer = 0;
     this.floaters = [];
-    this.respawnQueue = [];
 
     this.player = null;
     this.platforms = [];
+    this.cartLanes = [];
     this.carts = [];
     this.collectibles = [];
 
@@ -68,11 +75,14 @@
     this.bgOffset = 0;
     this.score = 0;
     this.timeLeft = 90;
+    this.runTime = 0;
+    this.orderSpawnTimer = 0.5;
+    this.cartSpawnTimer = 1.2;
+    this.cartCounter = 0;
     this.flashTimer = 0;
     this.statusText = this.testMode ? 'TEST MODE' : 'Смена началась';
     this.statusTimer = 1.4;
     this.floaters = [];
-    this.respawnQueue = [];
 
     this.setupLevel();
 
@@ -94,16 +104,23 @@
   StorageRunner.prototype.setupLevel = function () {
     this.platforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y },
-      { x: 88, y: 616, w: 240, h: 18 },
-      { x: 360, y: 560, w: 280, h: 18 },
-      { x: 700, y: 616, w: 240, h: 18 },
-      { x: 180, y: 470, w: 250, h: 18 },
-      { x: 520, y: 420, w: 280, h: 18 }
+      { x: 0, y: 620, w: 220, h: 18 },
+      { x: 270, y: 620, w: 220, h: 18 },
+      { x: 540, y: 620, w: 220, h: 18 },
+      { x: 804, y: 620, w: 220, h: 18 },
+      { x: 120, y: 530, w: 230, h: 18 },
+      { x: 420, y: 520, w: 230, h: 18 },
+      { x: 734, y: 510, w: 290, h: 18 },
+      { x: 0, y: 440, w: 220, h: 18 },
+      { x: 300, y: 430, w: 250, h: 18 },
+      { x: 700, y: 420, w: 324, h: 18 },
+      { x: 150, y: 350, w: 250, h: 18 },
+      { x: 500, y: 340, w: 260, h: 18 }
     ];
 
     this.player = {
       x: 110,
-      y: 564,
+      y: 568,
       w: 36,
       h: 52,
       vx: 0,
@@ -117,41 +134,101 @@
       facing: 1
     };
 
-    this.carts = [
-      { x: 150, y: FLOOR_Y - 40, w: 52, h: 32, speed: 165, dir: 1, minX: 24, maxX: 948, anim: 0 },
-      { x: 690, y: 528, w: 52, h: 32, speed: 130, dir: -1, minX: 392, maxX: 588, anim: 0 },
-      { x: 560, y: 388, w: 52, h: 32, speed: 115, dir: 1, minX: 532, maxX: 748, anim: 0 }
-    ];
+    this.cartLanes = [];
+    for (let i = 0; i < this.platforms.length; i += 1) {
+      const platform = this.platforms[i];
+      if (platform.w >= 180) {
+        this.cartLanes.push({
+          platformIndex: i,
+          y: platform.y - 32
+        });
+      }
+    }
 
+    this.carts = [];
     this.collectibles = [];
-    for (let i = 0; i < 6; i += 1) {
-      this.spawnCollectible();
+
+    for (let i = 0; i < 4; i += 1) {
+      this.spawnOrderFromTop();
     }
   };
 
-  StorageRunner.prototype.spawnCollectible = function () {
-    const choices = this.platforms.slice(1);
-    const base = choices[Math.floor(Math.random() * choices.length)];
-    const type = Math.random() < 0.32 ? 'order' : 'box';
-    const width = type === 'order' ? 24 : 26;
-    const height = type === 'order' ? 30 : 28;
-    const x = base.x + 22 + Math.random() * Math.max(40, base.w - 70);
-    const collectible = {
-      x: x,
-      y: base.y - height,
-      w: width,
-      h: height,
-      type: type,
-      value: type === 'order' ? 20 : 10,
-      bobPhase: Math.random() * Math.PI * 2
-    };
-    this.collectibles.push(collectible);
+  StorageRunner.prototype.getDifficulty = function () {
+    return clamp(this.runTime / 90, 0, 1);
   };
 
-  StorageRunner.prototype.queueRespawn = function (delay) {
-    this.respawnQueue.push({
-      remaining: delay
+  StorageRunner.prototype.getTargetActiveOrders = function () {
+    return 4 + Math.floor(this.getDifficulty() * 3);
+  };
+
+  StorageRunner.prototype.chooseOrderType = function () {
+    const difficulty = this.getDifficulty();
+    const fragileChance = 0.08 + difficulty * 0.18;
+    const urgentChance = 0.18 + difficulty * 0.20;
+    const roll = Math.random();
+
+    if (roll < fragileChance) {
+      return 'fragile';
+    }
+    if (roll < fragileChance + urgentChance) {
+      return 'urgent';
+    }
+    return 'ordinary';
+  };
+
+  StorageRunner.prototype.createOrder = function (type, targetPlatformIndex) {
+    const platform = this.platforms[targetPlatformIndex];
+    const sizeMap = {
+      ordinary: { w: 26, h: 28, value: 10 },
+      urgent: { w: 24, h: 30, value: 20 },
+      fragile: { w: 28, h: 26, value: 30 }
+    };
+    const data = sizeMap[type];
+    const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
+
+    return {
+      x: x,
+      y: -data.h - Math.random() * 140,
+      w: data.w,
+      h: data.h,
+      type: type,
+      value: data.value,
+      state: 'falling',
+      vy: 0,
+      platformIndex: null,
+      ttl: type === 'urgent' ? 5 : 0,
+      bobPhase: Math.random() * Math.PI * 2,
+      pulse: Math.random() * Math.PI * 2
+    };
+  };
+
+  StorageRunner.prototype.spawnOrderFromTop = function () {
+    const availablePlatforms = this.platforms.slice(1);
+    const targetPlatform = availablePlatforms[Math.floor(Math.random() * availablePlatforms.length)];
+    const targetPlatformIndex = this.platforms.indexOf(targetPlatform);
+    const type = this.chooseOrderType();
+    this.collectibles.push(this.createOrder(type, targetPlatformIndex));
+  };
+
+  StorageRunner.prototype.spawnCart = function () {
+    const difficulty = this.getDifficulty();
+    const lane = this.cartLanes[Math.floor(Math.random() * this.cartLanes.length)];
+    const fromLeft = Math.random() < 0.5;
+    const baseSpeed = 170 + difficulty * 80;
+
+    this.carts.push({
+      id: this.cartCounter,
+      x: fromLeft ? -72 : GAME_WIDTH + 72,
+      y: lane.y,
+      w: 52,
+      h: 32,
+      speed: baseSpeed + Math.random() * 35,
+      dir: fromLeft ? 1 : -1,
+      platformIndex: lane.platformIndex,
+      anim: 0
     });
+
+    this.cartCounter += 1;
   };
 
   StorageRunner.prototype.onKeyDown = function (event) {
@@ -258,6 +335,8 @@
       return;
     }
 
+    this.runTime += dt;
+
     if (!this.testMode) {
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) {
@@ -267,17 +346,21 @@
       }
     }
 
-    for (let i = this.respawnQueue.length - 1; i >= 0; i -= 1) {
-      this.respawnQueue[i].remaining -= dt;
-      if (this.respawnQueue[i].remaining <= 0) {
-        this.respawnQueue.splice(i, 1);
-        this.spawnCollectible();
-      }
+    this.orderSpawnTimer -= dt;
+    if (this.orderSpawnTimer <= 0 && this.collectibles.length < this.getTargetActiveOrders()) {
+      this.spawnOrderFromTop();
+      this.orderSpawnTimer = 1.2 - this.getDifficulty() * 0.55 + Math.random() * 0.35;
+    }
+
+    this.cartSpawnTimer -= dt;
+    if (this.cartSpawnTimer <= 0 && this.carts.length < 2 + Math.floor(this.getDifficulty() * 3)) {
+      this.spawnCart();
+      this.cartSpawnTimer = 3.3 - this.getDifficulty() * 1.6 + Math.random() * 0.5;
     }
 
     this.updatePlayer(dt);
+    this.updateOrders(dt);
     this.updateCarts(dt);
-    this.updateCollectibles(dt);
   };
 
   StorageRunner.prototype.updatePlayer = function (dt) {
@@ -300,7 +383,7 @@
     }
     this.input.jumpQueued = false;
 
-    player.vy += 1500 * dt;
+    player.vy += GRAVITY * dt;
     player.invulnerability = Math.max(0, player.invulnerability - dt);
 
     player.x += player.vx * dt;
@@ -329,6 +412,8 @@
       this.audio.play('hit');
       this.pushFloater(player.x, player.y, '-10');
       this.flashTimer = 0.2;
+      this.statusText = 'Падение между стеллажами';
+      this.statusTimer = 0.9;
     }
 
     player.frameTime += dt;
@@ -341,19 +426,116 @@
     }
   };
 
+  StorageRunner.prototype.getLandingPlatformIndex = function (item, previousY) {
+    let landedPlatformIndex = -1;
+    let landedPlatformY = Infinity;
+
+    for (let i = 0; i < this.platforms.length; i += 1) {
+      const platform = this.platforms[i];
+      const horizontalOverlap =
+        item.x + item.w > platform.x &&
+        item.x < platform.x + platform.w;
+      const wasAbove = previousY + item.h <= platform.y;
+      const nowBelowTop = item.y + item.h >= platform.y;
+
+      if (horizontalOverlap && wasAbove && nowBelowTop && platform.y < landedPlatformY) {
+        landedPlatformIndex = i;
+        landedPlatformY = platform.y;
+      }
+    }
+
+    return landedPlatformIndex;
+  };
+
+  StorageRunner.prototype.collectItem = function (index) {
+    const item = this.collectibles[index];
+    if (!item) {
+      return;
+    }
+
+    this.score += item.value;
+    this.audio.play(item.type === 'ordinary' ? 'pickup' : 'pickupRare');
+    this.pushFloater(item.x, item.y, '+' + item.value);
+
+    if (item.type === 'fragile') {
+      this.statusText = 'Хрупкий заказ пойман до падения';
+    } else if (item.type === 'urgent') {
+      this.statusText = 'Срочный заказ обработан';
+    } else {
+      this.statusText = 'Заказ принят';
+    }
+    this.statusTimer = 0.75;
+
+    this.collectibles.splice(index, 1);
+  };
+
+  StorageRunner.prototype.breakFragileOrder = function (index, item, platformIndex) {
+    const platform = this.platforms[platformIndex];
+    this.collectibles.splice(index, 1);
+    this.pushFloater(item.x, platform.y - 12, 'x');
+    this.statusText = 'Хрупкий заказ разбился';
+    this.statusTimer = 0.8;
+    this.flashTimer = 0.1;
+  };
+
+  StorageRunner.prototype.expireUrgentOrder = function (index, item) {
+    this.collectibles.splice(index, 1);
+    this.pushFloater(item.x, item.y, '!');
+    this.statusText = 'Срочный заказ просрочен';
+    this.statusTimer = 0.8;
+  };
+
+  StorageRunner.prototype.updateOrders = function (dt) {
+    for (let i = this.collectibles.length - 1; i >= 0; i -= 1) {
+      const item = this.collectibles[i];
+      item.pulse += dt * 4.5;
+      item.bobPhase += dt * 3;
+
+      if (rectsIntersect(this.player, item)) {
+        this.collectItem(i);
+        continue;
+      }
+
+      if (item.state === 'falling') {
+        const previousY = item.y;
+        item.vy += (GRAVITY - 60) * dt;
+        item.y += item.vy * dt;
+
+        const platformIndex = this.getLandingPlatformIndex(item, previousY);
+        if (platformIndex >= 0) {
+          const platform = this.platforms[platformIndex];
+          item.y = platform.y - item.h;
+          item.vy = 0;
+          item.platformIndex = platformIndex;
+
+          if (item.type === 'fragile') {
+            this.breakFragileOrder(i, item, platformIndex);
+            continue;
+          }
+
+          item.state = 'grounded';
+        }
+
+        if (item.y > GAME_HEIGHT + 60) {
+          this.collectibles.splice(i, 1);
+        }
+      } else {
+        if (item.type === 'urgent') {
+          item.ttl -= dt;
+          if (item.ttl <= 0) {
+            this.expireUrgentOrder(i, item);
+            continue;
+          }
+        }
+      }
+    }
+  };
+
   StorageRunner.prototype.updateCarts = function (dt) {
-    for (let i = 0; i < this.carts.length; i += 1) {
+    for (let i = this.carts.length - 1; i >= 0; i -= 1) {
       const cart = this.carts[i];
       cart.x += cart.speed * cart.dir * dt;
       cart.anim += dt * 8;
-
-      if (cart.x <= cart.minX) {
-        cart.x = cart.minX;
-        cart.dir = 1;
-      } else if (cart.x >= cart.maxX) {
-        cart.x = cart.maxX;
-        cart.dir = -1;
-      }
 
       if (this.player.invulnerability <= 0 && rectsIntersect(this.player, cart)) {
         this.score = Math.max(0, this.score - 15);
@@ -366,34 +548,25 @@
         this.audio.play('hit');
         this.pushFloater(this.player.x, this.player.y - 8, '-15');
       }
-    }
-  };
 
-  StorageRunner.prototype.updateCollectibles = function (dt) {
-    for (let i = this.collectibles.length - 1; i >= 0; i -= 1) {
-      const item = this.collectibles[i];
-      item.bobPhase += dt * 2.2;
-
-      if (rectsIntersect(this.player, item)) {
-        this.score += item.value;
-        this.audio.play(item.type === 'order' ? 'pickupRare' : 'pickup');
-        this.pushFloater(item.x, item.y, '+' + item.value);
-        this.collectibles.splice(i, 1);
-        this.queueRespawn(1.1 + Math.random() * 1.4);
-        continue;
+      for (let itemIndex = this.collectibles.length - 1; itemIndex >= 0; itemIndex -= 1) {
+        const item = this.collectibles[itemIndex];
+        if (item.state === 'grounded' &&
+            item.platformIndex === cart.platformIndex &&
+            rectsIntersect(cart, item)) {
+          const penalty = item.type === 'urgent' ? 8 : 5;
+          this.collectibles.splice(itemIndex, 1);
+          this.score = Math.max(0, this.score - penalty);
+          this.statusText = item.type === 'urgent'
+            ? 'Тележка увезла срочный заказ'
+            : 'Тележка увезла заказ';
+          this.statusTimer = 0.85;
+          this.pushFloater(item.x, item.y, '-' + penalty);
+        }
       }
 
-      for (let cartIndex = 0; cartIndex < this.carts.length; cartIndex += 1) {
-        const cart = this.carts[cartIndex];
-        if (rectsIntersect(item, cart)) {
-          this.collectibles.splice(i, 1);
-          this.queueRespawn(1.7 + Math.random() * 1.6);
-          this.score = Math.max(0, this.score - 5);
-          this.statusText = 'Тележка увезла заказ';
-          this.statusTimer = 0.85;
-          this.pushFloater(item.x, item.y, '-5');
-          break;
-        }
+      if (cart.x < -120 || cart.x > GAME_WIDTH + 120) {
+        this.carts.splice(i, 1);
       }
     }
   };
@@ -505,17 +678,62 @@
     }
   };
 
+  StorageRunner.prototype.renderSingleOrder = function (ctx, item) {
+    const isUrgent = item.type === 'urgent';
+    const isFragile = item.type === 'fragile';
+    const pulse = 0.75 + 0.25 * Math.sin(item.pulse);
+
+    if (isFragile) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 214, 239, 0.95)';
+      ctx.fillRect(item.x, item.y, item.w, item.h);
+      ctx.strokeStyle = 'rgba(255, 123, 170, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(item.x, item.y, item.w, item.h);
+      ctx.beginPath();
+      ctx.moveTo(item.x + 5, item.y + item.h - 5);
+      ctx.lineTo(item.x + item.w - 5, item.y + 5);
+      ctx.moveTo(item.x + 5, item.y + 5);
+      ctx.lineTo(item.x + item.w - 5, item.y + item.h - 5);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    const frame = isUrgent ? 5 : 4;
+    this.drawSprite(frame, item.x, item.y, item.w, item.h, false);
+
+    if (isUrgent) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 191, 89,' + pulse.toFixed(3) + ')';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(item.x - 2, item.y - 2, item.w + 4, item.h + 4);
+      const ttlRatio = clamp(item.ttl / 5, 0, 1);
+      ctx.fillStyle = 'rgba(255, 179, 71, 0.85)';
+      ctx.fillRect(item.x, item.y - 6, item.w * ttlRatio, 3);
+      ctx.restore();
+    }
+  };
+
   StorageRunner.prototype.renderItems = function (ctx) {
     for (let i = 0; i < this.collectibles.length; i += 1) {
       const item = this.collectibles[i];
-      const bob = Math.sin(item.bobPhase) * 3;
-      const frame = item.type === 'order' ? 5 : 4;
-      this.drawSprite(frame, item.x, item.y + bob, item.w, item.h, false);
+      const bob = item.state === 'grounded' ? Math.sin(item.bobPhase) * 2 : 0;
 
       ctx.fillStyle = 'rgba(255, 232, 150, 0.15)';
       ctx.beginPath();
-      ctx.ellipse(item.x + item.w / 2, item.y + item.h + 8, item.w / 1.1, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(item.x + item.w / 2, item.y + item.h + 8 + bob, item.w / 1.1, 5, 0, 0, Math.PI * 2);
       ctx.fill();
+
+      this.renderSingleOrder(ctx, {
+        x: item.x,
+        y: item.y + bob,
+        w: item.w,
+        h: item.h,
+        type: item.type,
+        ttl: item.ttl,
+        pulse: item.pulse
+      });
     }
   };
 
@@ -567,9 +785,9 @@
 
     ctx.save();
     ctx.fillStyle = 'rgba(8, 18, 34, 0.72)';
-    ctx.fillRect(360, 88, 304, 40);
+    ctx.fillRect(320, 88, 384, 40);
     ctx.strokeStyle = 'rgba(147, 189, 255, 0.2)';
-    ctx.strokeRect(360, 88, 304, 40);
+    ctx.strokeRect(320, 88, 384, 40);
     ctx.fillStyle = '#eef7ff';
     ctx.font = '600 20px Segoe UI';
     ctx.textAlign = 'center';
