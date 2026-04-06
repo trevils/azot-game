@@ -28,6 +28,8 @@
     this.sprites.src = 'assets/sprites.png';
     this.bgTile = new Image();
     this.bgTile.src = 'assets/bg-tile.png';
+    this.energyIcon = new Image();
+    this.energyIcon.src = 'assets/energy.png';
 
     this.lastTimestamp = 0;
     this.bgOffset = 0;
@@ -41,6 +43,7 @@
     this.runTime = 0;
     this.orderSpawnTimer = 0;
     this.cartSpawnTimer = 0;
+    this.bonusSpawnTimer = 0;
     this.cartCounter = 0;
 
     this.input = {
@@ -59,6 +62,7 @@
     this.cartLanes = [];
     this.carts = [];
     this.collectibles = [];
+    this.bonuses = [];
 
     this.boundLoop = this.loop.bind(this);
     this.handleKeyDown = this.onKeyDown.bind(this);
@@ -78,6 +82,7 @@
     this.runTime = 0;
     this.orderSpawnTimer = 0.5;
     this.cartSpawnTimer = 1.2;
+    this.bonusSpawnTimer = 8;
     this.cartCounter = 0;
     this.flashTimer = 0;
     this.statusText = this.testMode ? 'TEST MODE' : 'Смена началась';
@@ -125,10 +130,13 @@
       h: 52,
       vx: 0,
       vy: 0,
+      baseSpeed: 270,
       speed: 270,
+      baseJumpForce: 580,
       jumpForce: 580,
       onGround: false,
       invulnerability: 0,
+      boostTimer: 0,
       frameTime: 0,
       frameIndex: 0,
       facing: 1
@@ -147,6 +155,7 @@
 
     this.carts = [];
     this.collectibles = [];
+    this.bonuses = [];
 
     for (let i = 0; i < 4; i += 1) {
       this.spawnOrderFromTop();
@@ -181,10 +190,7 @@
 
     for (let i = 1; i < this.platforms.length; i += 1) {
       const platform = this.platforms[i];
-      const horizontalOverlap =
-        x + width > platform.x &&
-        x < platform.x + platform.w;
-
+      const horizontalOverlap = x + width > platform.x && x < platform.x + platform.w;
       if (horizontalOverlap) {
         result.push(i);
       }
@@ -202,13 +208,16 @@
     const sizeMap = {
       ordinary: { w: 26, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
       urgent: { w: 24, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
-      fragile: { w: 28, h: 26, value: 30, gravityScale: 0.62, maxFallSpeed: 520 }
+      fragile: { w: 28, h: 26, value: 30, gravityScale: 0.45, maxFallSpeed: 340 }
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
     const supportedPlatforms = this.getPlatformsUnderX(x, data.w);
+    const targetStopPlatformIndex = type === 'fragile'
+      ? null
+      : supportedPlatforms[Math.floor(Math.random() * supportedPlatforms.length)];
     const fragileBreakPlatformIndex = type === 'fragile'
-      ? supportedPlatforms[Math.floor(Math.random() * supportedPlatforms.length)]
+      ? supportedPlatforms[supportedPlatforms.length - 1]
       : null;
 
     return {
@@ -221,6 +230,7 @@
       state: 'falling',
       vy: 0,
       platformIndex: null,
+      targetStopPlatformIndex: targetStopPlatformIndex,
       ttl: type === 'urgent' ? 5 : 0,
       bobPhase: Math.random() * Math.PI * 2,
       pulse: Math.random() * Math.PI * 2,
@@ -236,6 +246,32 @@
     const targetPlatformIndex = this.platforms.indexOf(targetPlatform);
     const type = this.chooseOrderType();
     this.collectibles.push(this.createOrder(type, targetPlatformIndex));
+  };
+
+  StorageRunner.prototype.spawnEnergyBonus = function () {
+    const platformIndex = 1 + Math.floor(Math.random() * (this.platforms.length - 1));
+    const platform = this.platforms[platformIndex];
+    const bonus = {
+      type: 'energy',
+      x: platform.x + 24 + Math.random() * Math.max(24, platform.w - 52),
+      y: platform.y - 22,
+      w: 20,
+      h: 24,
+      ttl: 7,
+      platformIndex: platformIndex,
+      bobPhase: Math.random() * Math.PI * 2
+    };
+    this.bonuses.push(bonus);
+  };
+
+  StorageRunner.prototype.applyEnergyBoost = function () {
+    this.player.boostTimer = 5;
+    this.player.speed = this.player.baseSpeed + 85;
+    this.player.jumpForce = this.player.baseJumpForce + 110;
+    this.statusText = 'Энергетик: скорость и прыжок усилены';
+    this.statusTimer = 1.1;
+    this.pushFloater(this.player.x, this.player.y - 10, 'BOOST');
+    this.audio.play('pickupRare');
   };
 
   StorageRunner.prototype.spawnCart = function () {
@@ -365,6 +401,17 @@
 
     this.runTime += dt;
 
+    if (this.player.boostTimer > 0) {
+      this.player.boostTimer -= dt;
+      if (this.player.boostTimer <= 0) {
+        this.player.boostTimer = 0;
+        this.player.speed = this.player.baseSpeed;
+        this.player.jumpForce = this.player.baseJumpForce;
+        this.statusText = 'Энергетик закончился';
+        this.statusTimer = 0.8;
+      }
+    }
+
     if (!this.testMode) {
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) {
@@ -386,8 +433,15 @@
       this.cartSpawnTimer = 3.3 - this.getDifficulty() * 1.6 + Math.random() * 0.5;
     }
 
+    this.bonusSpawnTimer -= dt;
+    if (this.bonusSpawnTimer <= 0 && this.bonuses.length < 1) {
+      this.spawnEnergyBonus();
+      this.bonusSpawnTimer = 14 + Math.random() * 6;
+    }
+
     this.updatePlayer(dt);
     this.updateOrders(dt);
+    this.updateBonuses(dt);
     this.updateCarts(dt);
   };
 
@@ -460,9 +514,7 @@
 
     for (let i = 0; i < this.platforms.length; i += 1) {
       const platform = this.platforms[i];
-      const horizontalOverlap =
-        item.x + item.w > platform.x &&
-        item.x < platform.x + platform.w;
+      const horizontalOverlap = item.x + item.w > platform.x && item.x < platform.x + platform.w;
       const wasAbove = previousY + item.h <= platform.y;
       const nowBelowTop = item.y + item.h >= platform.y;
 
@@ -544,23 +596,52 @@
             }
 
             item.y = platform.y - item.h + 2;
-            item.vy = 12;
+            item.vy = 8;
             item.platformIndex = null;
-          } else {
+          } else if (platformIndex === item.targetStopPlatformIndex) {
             item.state = 'grounded';
+          } else {
+            item.y = platform.y - item.h + 2;
+            item.vy = 10;
+            item.platformIndex = null;
           }
         }
 
         if (item.y > GAME_HEIGHT + 60) {
           this.collectibles.splice(i, 1);
         }
-      } else {
-        if (item.type === 'urgent') {
-          item.ttl -= dt;
-          if (item.ttl <= 0) {
-            this.expireUrgentOrder(i, item);
-            continue;
-          }
+      } else if (item.type === 'urgent') {
+        item.ttl -= dt;
+        if (item.ttl <= 0) {
+          this.expireUrgentOrder(i, item);
+          continue;
+        }
+      }
+    }
+  };
+
+  StorageRunner.prototype.updateBonuses = function (dt) {
+    for (let i = this.bonuses.length - 1; i >= 0; i -= 1) {
+      const bonus = this.bonuses[i];
+      bonus.ttl -= dt;
+      bonus.bobPhase += dt * 4;
+
+      if (bonus.ttl <= 0) {
+        this.bonuses.splice(i, 1);
+        continue;
+      }
+
+      if (rectsIntersect(this.player, bonus)) {
+        this.applyEnergyBoost();
+        this.bonuses.splice(i, 1);
+        continue;
+      }
+
+      for (let cartIndex = 0; cartIndex < this.carts.length; cartIndex += 1) {
+        const cart = this.carts[cartIndex];
+        if (cart.platformIndex === bonus.platformIndex && rectsIntersect(cart, bonus)) {
+          this.bonuses.splice(i, 1);
+          break;
         }
       }
     }
@@ -652,6 +733,7 @@
     this.renderBackground(ctx);
     this.renderPlatforms(ctx);
     this.renderItems(ctx);
+    this.renderBonuses(ctx);
     this.renderCarts(ctx);
     this.renderPlayer(ctx);
     this.renderFloaters(ctx);
@@ -772,6 +854,25 @@
     }
   };
 
+  StorageRunner.prototype.renderBonuses = function (ctx) {
+    for (let i = 0; i < this.bonuses.length; i += 1) {
+      const bonus = this.bonuses[i];
+      const bob = Math.sin(bonus.bobPhase) * 2.5;
+
+      ctx.fillStyle = 'rgba(108, 255, 187, 0.18)';
+      ctx.beginPath();
+      ctx.ellipse(bonus.x + bonus.w / 2, bonus.y + bonus.h + 8 + bob, bonus.w / 1.3, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (this.energyIcon.complete) {
+        ctx.drawImage(this.energyIcon, bonus.x, bonus.y + bob, bonus.w, bonus.h);
+      } else {
+        ctx.fillStyle = '#9dffbf';
+        ctx.fillRect(bonus.x, bonus.y + bob, bonus.w, bonus.h);
+      }
+    }
+  };
+
   StorageRunner.prototype.renderCarts = function (ctx) {
     for (let i = 0; i < this.carts.length; i += 1) {
       const cart = this.carts[i];
@@ -786,6 +887,14 @@
       return;
     }
     this.drawSprite(player.frameIndex, player.x, player.y, player.w, player.h, player.facing < 0);
+
+    if (player.boostTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(132, 255, 184, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(player.x - 3, player.y - 3, player.w + 6, player.h + 6);
+      ctx.restore();
+    }
 
     if (this.testMode) {
       ctx.fillStyle = 'rgba(120, 184, 255, 0.12)';
