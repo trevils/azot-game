@@ -176,15 +176,40 @@
     return 'ordinary';
   };
 
+  StorageRunner.prototype.getPlatformsUnderX = function (x, width) {
+    const result = [];
+
+    for (let i = 1; i < this.platforms.length; i += 1) {
+      const platform = this.platforms[i];
+      const horizontalOverlap =
+        x + width > platform.x &&
+        x < platform.x + platform.w;
+
+      if (horizontalOverlap) {
+        result.push(i);
+      }
+    }
+
+    result.sort(function (a, b) {
+      return this.platforms[a].y - this.platforms[b].y;
+    }.bind(this));
+
+    return result.length ? result : [1];
+  };
+
   StorageRunner.prototype.createOrder = function (type, targetPlatformIndex) {
     const platform = this.platforms[targetPlatformIndex];
     const sizeMap = {
-      ordinary: { w: 26, h: 28, value: 10 },
-      urgent: { w: 24, h: 30, value: 20 },
-      fragile: { w: 28, h: 26, value: 30 }
+      ordinary: { w: 26, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
+      urgent: { w: 24, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
+      fragile: { w: 28, h: 26, value: 30, gravityScale: 0.62, maxFallSpeed: 520 }
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
+    const supportedPlatforms = this.getPlatformsUnderX(x, data.w);
+    const fragileBreakPlatformIndex = type === 'fragile'
+      ? supportedPlatforms[Math.floor(Math.random() * supportedPlatforms.length)]
+      : null;
 
     return {
       x: x,
@@ -198,7 +223,10 @@
       platformIndex: null,
       ttl: type === 'urgent' ? 5 : 0,
       bobPhase: Math.random() * Math.PI * 2,
-      pulse: Math.random() * Math.PI * 2
+      pulse: Math.random() * Math.PI * 2,
+      gravityScale: data.gravityScale,
+      maxFallSpeed: data.maxFallSpeed,
+      fragileBreakPlatformIndex: fragileBreakPlatformIndex
     };
   };
 
@@ -498,7 +526,8 @@
 
       if (item.state === 'falling') {
         const previousY = item.y;
-        item.vy += (GRAVITY - 60) * dt;
+        item.vy += (GRAVITY - 60) * item.gravityScale * dt;
+        item.vy = Math.min(item.vy, item.maxFallSpeed);
         item.y += item.vy * dt;
 
         const platformIndex = this.getLandingPlatformIndex(item, previousY);
@@ -509,11 +538,17 @@
           item.platformIndex = platformIndex;
 
           if (item.type === 'fragile') {
-            this.breakFragileOrder(i, item, platformIndex);
-            continue;
-          }
+            if (platformIndex === item.fragileBreakPlatformIndex) {
+              this.breakFragileOrder(i, item, platformIndex);
+              continue;
+            }
 
-          item.state = 'grounded';
+            item.y = platform.y - item.h + 2;
+            item.vy = 12;
+            item.platformIndex = null;
+          } else {
+            item.state = 'grounded';
+          }
         }
 
         if (item.y > GAME_HEIGHT + 60) {
