@@ -3,24 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Азот: Сборщик заказов</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="page-shell">
+    <main class="app" aria-label="Игра Азот: Сборщик заказов">
       <section id="start-screen" class="screen active">
         <div class="screen-panel start-panel">
           <p class="eyebrow">2D платформер</p>
+          <h1 class="game-title">Азот: Сборщик заказов</h1>
           <p class="subtitle">Собирай коробки и отдельные заказы быстрее других. Избегай тележек, чтобы не потерять очки.</p>
 
           <div class="instructions">
             <h2>Как играть</h2>
             <ol>
               <li style="--delay: 0.05s;">A / D или ← / → - движение</li>
-              <li style="--delay: 0.15s;">W или ↑ - прыжок</li>
-              <li style="--delay: 0.25s;">Space или P - пауза</li>
-              <li style="--delay: 0.35s;">Коробка = 10 очков, срочный заказ = 20 очков, хрупкий заказ = 30 очков</li>
-              <li style="--delay: 0.45s;">Тележка может сбить тебя или забрать заказ</li>
-              <li style="--delay: 0.55s;">Имя <strong>tester</strong> включает тестовый режим</li>
               <li style="--delay: 0.12s;">S / ↓ - спуск сквозь платформы</li>
               <li style="--delay: 0.19s;">W или ↑ - прыжок</li>
               <li style="--delay: 0.26s;">Space или P - пауза</li>
@@ -96,6 +94,7 @@
 
       <section id="end-screen" class="screen" aria-hidden="true">
         <div class="screen-panel end-panel">
+          <p class="eyebrow">Экран окончания</p>
           <h2>Смена завершена</h2>
           <p id="end-summary" class="end-summary">Итог: 0 очков</p>
           <p id="end-extra" class="end-extra">Результат сохранён в таблицу.</p>
@@ -106,6 +105,7 @@
               <thead>
                 <tr>
                   <th>Место</th>
+                  <th>Игрок</th>
                   <th>Очки</th>
                 </tr>
               </thead>
@@ -116,8 +116,8 @@
           <p id="player-rank" class="rank-note hidden"></p>
 
           <div class="end-actions">
-            <button id="restart-btn" class="primary-btn" type="button">Заново</button>
             <button id="restart-btn" class="primary-btn" type="button">Начать снова</button>
+            <button id="back-btn" class="icon-btn" type="button">К старту</button>
           </div>
         </div>
       </section>

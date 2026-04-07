@@ -178,10 +178,6 @@
   function onFinish(payload) {
     setScreen('end');
 
-    elements.endSummary.textContent = payload.testMode
-      ? 'Тестовая смена завершена: ' + payload.score + ' очков'
-      : 'Итог: ' + payload.score + ' очков';
-
     if (payload.testMode) {
       elements.endSummary.textContent = 'Тестовая смена завершена: ' + payload.score + ' очков';
       elements.endExtra.textContent = 'Тестовый результат не сохраняется в таблицу.';
@@ -193,16 +189,6 @@
     if (payload.reason === 'fall') {
       elements.endSummary.textContent = 'Смена провалена: ' + payload.score + ' очков';
     } else {
-      const saveResult = window.AZOTStorage.saveScore(payload.playerName, payload.score);
-      renderLeaderboard(saveResult);
-      if (saveResult.rank > 10) {
-        elements.endExtra.textContent = 'Таблица показывает топ-9 и твоё место вместо 10-й строки.';
-        elements.playerRank.textContent = 'Твоё место в общем рейтинге: ' + saveResult.rank;
-        elements.playerRank.classList.remove('hidden');
-      } else {
-        elements.endExtra.textContent = 'Результат сохранён в таблицу.';
-        elements.playerRank.classList.add('hidden');
-      }
       elements.endSummary.textContent = 'Итог: ' + payload.score + ' очков';
     }
 
