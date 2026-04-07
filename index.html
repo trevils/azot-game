@@ -3,16 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Склад Азот: Сборщик</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="page-shell">
-    <main class="app" aria-label="Склад Азот: Сборщик">
       <section id="start-screen" class="screen active">
         <div class="screen-panel start-panel">
           <p class="eyebrow">2D платформер</p>
-          <h1 class="game-title">Склад Азот: Сборщик</h1>
           <p class="subtitle">Собирай коробки и отдельные заказы быстрее других. Избегай тележек, чтобы не потерять очки.</p>
 
           <div class="instructions">
@@ -24,6 +21,14 @@
               <li style="--delay: 0.35s;">Коробка = 10 очков, срочный заказ = 20 очков, хрупкий заказ = 30 очков</li>
               <li style="--delay: 0.45s;">Тележка может сбить тебя или забрать заказ</li>
               <li style="--delay: 0.55s;">Имя <strong>tester</strong> включает тестовый режим</li>
+              <li style="--delay: 0.12s;">S / ↓ - спуск сквозь платформы</li>
+              <li style="--delay: 0.19s;">W или ↑ - прыжок</li>
+              <li style="--delay: 0.26s;">Space или P - пауза</li>
+              <li style="--delay: 0.33s;">С краёв экрана можно выбежать и появиться с другой стороны</li>
+              <li style="--delay: 0.40s;">Не падай вниз уровня - это завершит смену</li>
+              <li style="--delay: 0.47s;">Коробка = 10 очков, заказ = 20 очков, хрупкий = 30 очков</li>
+              <li style="--delay: 0.54s;">Тележка может сбить тебя или увести заказ</li>
+              <li style="--delay: 0.61s;">Имя <strong>tester</strong> включает тестовый режим</li>
             </ol>
           </div>
 
@@ -91,7 +96,6 @@
 
       <section id="end-screen" class="screen" aria-hidden="true">
         <div class="screen-panel end-panel">
-          <p class="eyebrow">Экран конца смены</p>
           <h2>Смена завершена</h2>
           <p id="end-summary" class="end-summary">Итог: 0 очков</p>
           <p id="end-extra" class="end-extra">Результат сохранён в таблицу.</p>
@@ -102,7 +106,6 @@
               <thead>
                 <tr>
                   <th>Место</th>
-                  <th>Работник</th>
                   <th>Очки</th>
                 </tr>
               </thead>
@@ -114,7 +117,7 @@
 
           <div class="end-actions">
             <button id="restart-btn" class="primary-btn" type="button">Заново</button>
-            <button id="back-btn" class="icon-btn" type="button">Главное меню</button>
+            <button id="restart-btn" class="primary-btn" type="button">Начать снова</button>
           </div>
         </div>
       </section>

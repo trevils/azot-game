@@ -12,6 +12,8 @@
     playerJump: { sx: 48, sy: 1, sw: 17, sh: 29 },
     box: { sx: 74, sy: 13, sw: 20, sh: 18 },
     paper: { sx: 98, sy: 8, sw: 17, sh: 23 },
+    fragile: { sx: 117, sy: 10, sw: 22, sh: 21 },
+    energy: { sx: 145, sy: 11, sw: 13, sh: 20 },
     cart1: { sx: 167, sy: 8, sw: 27, sh: 23 },
     cart2: { sx: 199, sy: 8, sw: 27, sh: 23 }
   };
@@ -132,6 +134,19 @@
       { x: 700, y: 420, w: 324, h: 18 },
       { x: 150, y: 350, w: 250, h: 18 },
       { x: 500, y: 340, w: 260, h: 18 }
+      { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
+      { x: 0, y: 620, w: 220, h: 18, solid: true },
+      { x: 270, y: 620, w: 220, h: 18, solid: true },
+      { x: 540, y: 620, w: 220, h: 18, solid: true },
+      { x: 804, y: 620, w: 220, h: 18, solid: true },
+      { x: 120, y: 530, w: 230, h: 18, solid: true },
+      { x: 420, y: 520, w: 230, h: 18, solid: true },
+      { x: 734, y: 510, w: 290, h: 18, solid: true },
+      { x: 0, y: 440, w: 220, h: 18, solid: true },
+      { x: 300, y: 430, w: 250, h: 18, solid: true },
+      { x: 700, y: 420, w: 324, h: 18, solid: true },
+      { x: 150, y: 350, w: 250, h: 18, solid: true },
+      { x: 500, y: 340, w: 260, h: 18, solid: true }
     ];
 
     this.player = {
@@ -139,6 +154,9 @@
       y: 568,
       w: 36,
       h: 52,
+      y: 560,
+      w: 28,
+      h: 60,
       vx: 0,
       vy: 0,
       baseSpeed: 270,
@@ -149,6 +167,7 @@
       invulnerability: 0,
       boostTimer: 0,
       supportPlatformIndex: 0,
+      supportPlatformIndex: -1,
       dropThroughPlatformIndex: -1,
       dropResumeY: 0,
       frameTime: 0,
@@ -158,11 +177,13 @@
 
     this.cartLanes = [];
     for (let i = 0; i < this.platforms.length; i += 1) {
+    for (let i = 1; i < this.platforms.length; i += 1) {
       const platform = this.platforms[i];
       if (platform.w >= 180) {
         this.cartLanes.push({
           platformIndex: i,
           y: platform.y - 32
+          y: platform.y - 36
         });
       }
     }
@@ -223,6 +244,9 @@
       ordinary: { w: 26, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
       urgent: { w: 24, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
       fragile: { w: 28, h: 26, value: 30, gravityScale: 0.3, maxFallSpeed: 230 }
+      ordinary: { w: 28, h: 25, value: 10, gravityScale: 1, maxFallSpeed: 960 },
+      urgent: { w: 22, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
+      fragile: { w: 28, h: 27, value: 30, gravityScale: 0.22, maxFallSpeed: 160 }
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
@@ -266,16 +290,21 @@
     const platformIndex = 1 + Math.floor(Math.random() * (this.platforms.length - 1));
     const platform = this.platforms[platformIndex];
     const bonus = {
+    this.bonuses.push({
       type: 'energy',
       x: platform.x + 24 + Math.random() * Math.max(24, platform.w - 52),
       y: platform.y - 22,
       w: 20,
       h: 24,
+      y: platform.y - 28,
+      w: 18,
+      h: 28,
       ttl: 7,
       platformIndex: platformIndex,
       bobPhase: Math.random() * Math.PI * 2
     };
     this.bonuses.push(bonus);
+    });
   };
 
   StorageRunner.prototype.applyEnergyBoost = function () {
@@ -297,9 +326,12 @@
     this.carts.push({
       id: this.cartCounter,
       x: fromLeft ? -72 : GAME_WIDTH + 72,
+      x: fromLeft ? -64 : GAME_WIDTH + 64,
       y: lane.y,
       w: 52,
       h: 32,
+      w: 42,
+      h: 36,
       speed: baseSpeed + Math.random() * 35,
       dir: fromLeft ? 1 : -1,
       platformIndex: lane.platformIndex,
@@ -369,6 +401,7 @@
   };
 
   StorageRunner.prototype.finishRun = function () {
+  StorageRunner.prototype.finishRun = function (reason) {
     if (this.finished) {
       return;
     }
@@ -384,6 +417,8 @@
         playerName: this.playerName,
         score: this.score,
         testMode: this.testMode
+        testMode: this.testMode,
+        reason: reason || 'complete'
       });
     }
   };
@@ -453,6 +488,7 @@
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.finishRun();
+        this.finishRun('timeout');
         return;
       }
     }
@@ -476,6 +512,9 @@
     }
 
     this.updatePlayer(dt);
+    if (!this.running) {
+      return;
+    }
     this.updateOrders(dt);
     this.updateBonuses(dt);
     this.updateCarts(dt);
@@ -510,6 +549,11 @@
 
     player.x += player.vx * dt;
     player.x = clamp(player.x, 0, GAME_WIDTH - player.w);
+    if (player.x > GAME_WIDTH) {
+      player.x = -player.w + 1;
+    } else if (player.x + player.w < 0) {
+      player.x = GAME_WIDTH - 1;
+    }
 
     const previousY = player.y;
     player.y += player.vy * dt;
@@ -517,6 +561,7 @@
     player.supportPlatformIndex = -1;
 
     for (let i = 0; i < this.platforms.length; i += 1) {
+    for (let i = 1; i < this.platforms.length; i += 1) {
       if (i === player.dropThroughPlatformIndex) {
         continue;
       }
@@ -547,6 +592,29 @@
       this.flashTimer = 0.2;
       this.statusText = 'Падение между стеллажами';
       this.statusTimer = 0.9;
+    if (player.onGround && this.input.down && player.supportPlatformIndex > 0) {
+      this.beginDropThrough();
+    }
+
+    if (player.y > GAME_HEIGHT + 24) {
+      if (this.testMode) {
+        player.y = 560;
+        player.vy = 0;
+        player.x = 110;
+        player.dropThroughPlatformIndex = -1;
+        player.supportPlatformIndex = -1;
+        this.score = Math.max(0, this.score - 10);
+        this.audio.play('hit');
+        this.pushFloater(player.x, player.y, '-10');
+        this.flashTimer = 0.2;
+        this.statusText = 'Тестовый сброс после падения';
+        this.statusTimer = 0.9;
+      } else {
+        this.statusText = 'Падение вниз уровня';
+        this.statusTimer = 1.2;
+        this.finishRun('fall');
+        return;
+      }
     }
 
     player.frameTime += dt;
@@ -564,6 +632,7 @@
     let landedPlatformY = Infinity;
 
     for (let i = 0; i < this.platforms.length; i += 1) {
+    for (let i = 1; i < this.platforms.length; i += 1) {
       const platform = this.platforms[i];
       const horizontalOverlap = item.x + item.w > platform.x && item.x < platform.x + platform.w;
       const wasAbove = previousY + item.h <= platform.y;
@@ -648,6 +717,7 @@
 
             item.y = platform.y - item.h + 2;
             item.vy = 6;
+            item.vy = 4;
             item.platformIndex = null;
           } else if (platformIndex === item.targetStopPlatformIndex) {
             item.state = 'grounded';
@@ -829,7 +899,10 @@
     ctx.fillStyle = '#10213b';
     ctx.fillRect(0, FLOOR_Y - 10, GAME_WIDTH, 10);
     ctx.fillStyle = '#16294a';
+    ctx.fillStyle = '#2b0e18';
     ctx.fillRect(0, FLOOR_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_Y);
+    ctx.fillStyle = 'rgba(255, 86, 86, 0.55)';
+    ctx.fillRect(0, FLOOR_Y + 4, GAME_WIDTH, 4);
   };
 
   StorageRunner.prototype.renderPlatforms = function (ctx) {
@@ -852,10 +925,12 @@
     const pulse = 0.75 + 0.25 * Math.sin(item.pulse);
 
     if (isFragile) {
+      this.drawSprite('fragile', item.x, item.y, item.w, item.h, false);
       ctx.save();
       ctx.fillStyle = 'rgba(255, 214, 239, 0.95)';
       ctx.fillRect(item.x, item.y, item.w, item.h);
       ctx.strokeStyle = 'rgba(255, 123, 170, 0.95)';
+      ctx.strokeStyle = 'rgba(255, 176, 220, 0.8)';
       ctx.lineWidth = 2;
       ctx.strokeRect(item.x, item.y, item.w, item.h);
       ctx.beginPath();
@@ -864,6 +939,7 @@
       ctx.moveTo(item.x + 5, item.y + 5);
       ctx.lineTo(item.x + item.w - 5, item.y + item.h - 5);
       ctx.stroke();
+      ctx.strokeRect(item.x - 1, item.y - 1, item.w + 2, item.h + 2);
       ctx.restore();
       return;
     }
@@ -920,6 +996,7 @@
         ctx.fillStyle = '#9dffbf';
         ctx.fillRect(bonus.x, bonus.y + bob, bonus.w, bonus.h);
       }
+      this.drawSprite('energy', bonus.x, bonus.y + bob, bonus.w, bonus.h, false);
     }
   };
 
