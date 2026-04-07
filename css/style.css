@@ -79,6 +79,17 @@ body {
   min-height: calc(100% - 80px);
 }
 
+#end-screen {
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+
+.end-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: auto;
+}
+
 .eyebrow {
   margin: 0 0 10px;
   text-transform: uppercase;
@@ -162,6 +173,14 @@ body {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+.end-actions {
+  margin-top: 16px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 14px;
+  background: linear-gradient(180deg, rgba(12, 26, 49, 0), rgba(12, 26, 49, 0.98) 28%);
 }
 
 .primary-btn,
@@ -311,6 +330,12 @@ body {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(144, 192, 255, 0.12);
+  max-height: 410px;
+  overflow-y: auto;
+}
+
+.leaderboard-wrap h3 {
+  margin-top: 0;
 }
 
 .leaderboard {
@@ -329,7 +354,6 @@ body {
 .leaderboard th:last-child {
   text-align: right;
 }
-
 
 .leaderboard-row-own {
   background: rgba(120, 184, 255, 0.12);

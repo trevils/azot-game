@@ -177,6 +177,7 @@
 
   function onFinish(payload) {
     setScreen('end');
+    screens.end.scrollTop = 0;
 
     if (payload.testMode) {
       elements.endSummary.textContent = 'Тестовая смена завершена: ' + payload.score + ' очков';

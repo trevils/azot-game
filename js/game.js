@@ -120,31 +120,43 @@
   StorageRunner.prototype.setupLevel = function () {
     this.platforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
-      { x: 0, y: 620, w: 220, h: 18, solid: true },
-      { x: 270, y: 620, w: 220, h: 18, solid: true },
-      { x: 540, y: 620, w: 220, h: 18, solid: true },
-      { x: 804, y: 620, w: 220, h: 18, solid: true },
-      { x: 120, y: 530, w: 230, h: 18, solid: true },
-      { x: 420, y: 520, w: 230, h: 18, solid: true },
-      { x: 734, y: 510, w: 290, h: 18, solid: true },
-      { x: 0, y: 440, w: 220, h: 18, solid: true },
-      { x: 300, y: 430, w: 250, h: 18, solid: true },
-      { x: 700, y: 420, w: 324, h: 18, solid: true },
-      { x: 150, y: 350, w: 250, h: 18, solid: true },
-      { x: 500, y: 340, w: 260, h: 18, solid: true }
+      { x: 20, y: 600, w: 210, h: 18, solid: true },
+      { x: 270, y: 600, w: 210, h: 18, solid: true },
+      { x: 520, y: 600, w: 220, h: 18, solid: true },
+      { x: 800, y: 600, w: 204, h: 18, solid: true },
+
+      { x: 90, y: 515, w: 220, h: 18, solid: true },
+      { x: 390, y: 505, w: 230, h: 18, solid: true },
+      { x: 690, y: 495, w: 270, h: 18, solid: true },
+
+      { x: 0, y: 430, w: 210, h: 18, solid: true },
+      { x: 280, y: 420, w: 240, h: 18, solid: true },
+      { x: 610, y: 410, w: 220, h: 18, solid: true },
+      { x: 860, y: 430, w: 144, h: 18, solid: true },
+
+      { x: 110, y: 345, w: 220, h: 18, solid: true },
+      { x: 390, y: 335, w: 230, h: 18, solid: true },
+      { x: 700, y: 325, w: 250, h: 18, solid: true },
+
+      { x: 60, y: 260, w: 210, h: 18, solid: true },
+      { x: 360, y: 250, w: 210, h: 18, solid: true },
+      { x: 690, y: 240, w: 230, h: 18, solid: true }
     ];
 
     this.player = {
-      x: 110,
-      y: 560,
-      w: 28,
-      h: 60,
+      x: 90,
+      y: 530,
+      w: 34,
+      h: 72,
       vx: 0,
       vy: 0,
       baseSpeed: 270,
       speed: 270,
       baseJumpForce: 580,
       jumpForce: 580,
+      baseMaxAirJumps: 0,
+      maxAirJumps: 0,
+      airJumpsLeft: 0,
       onGround: false,
       invulnerability: 0,
       boostTimer: 0,
@@ -162,7 +174,7 @@
       if (platform.w >= 180) {
         this.cartLanes.push({
           platformIndex: i,
-          y: platform.y - 36
+          y: platform.y - 40
         });
       }
     }
@@ -220,9 +232,9 @@
   StorageRunner.prototype.createOrder = function (type, targetPlatformIndex) {
     const platform = this.platforms[targetPlatformIndex];
     const sizeMap = {
-      ordinary: { w: 28, h: 25, value: 10, gravityScale: 1, maxFallSpeed: 960 },
-      urgent: { w: 22, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
-      fragile: { w: 28, h: 27, value: 30, gravityScale: 0.22, maxFallSpeed: 160 }
+      ordinary: { w: 30, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
+      urgent: { w: 24, h: 33, value: 20, gravityScale: 1, maxFallSpeed: 980 },
+      fragile: { w: 31, h: 29, value: 30, gravityScale: 0.22, maxFallSpeed: 150 }
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
@@ -267,10 +279,10 @@
     const platform = this.platforms[platformIndex];
     this.bonuses.push({
       type: 'energy',
-      x: platform.x + 24 + Math.random() * Math.max(24, platform.w - 52),
-      y: platform.y - 28,
-      w: 18,
-      h: 28,
+      x: platform.x + 24 + Math.random() * Math.max(24, platform.w - 56),
+      y: platform.y - 32,
+      w: 20,
+      h: 31,
       ttl: 7,
       platformIndex: platformIndex,
       bobPhase: Math.random() * Math.PI * 2
@@ -280,8 +292,9 @@
   StorageRunner.prototype.applyEnergyBoost = function () {
     this.player.boostTimer = 5;
     this.player.speed = this.player.baseSpeed + 85;
-    this.player.jumpForce = this.player.baseJumpForce + 110;
-    this.statusText = 'Энергетик: скорость и прыжок усилены';
+    this.player.maxAirJumps = 1;
+    this.player.airJumpsLeft = Math.max(this.player.airJumpsLeft, 1);
+    this.statusText = 'Энергетик: ускорение и двойной прыжок';
     this.statusTimer = 1.1;
     this.pushFloater(this.player.x, this.player.y - 10, 'BOOST');
     this.audio.play('pickupRare');
@@ -295,10 +308,10 @@
 
     this.carts.push({
       id: this.cartCounter,
-      x: fromLeft ? -64 : GAME_WIDTH + 64,
+      x: fromLeft ? -72 : GAME_WIDTH + 72,
       y: lane.y,
-      w: 42,
-      h: 36,
+      w: 54,
+      h: 42,
       speed: baseSpeed + Math.random() * 35,
       dir: fromLeft ? 1 : -1,
       platformIndex: lane.platformIndex,
@@ -334,9 +347,7 @@
       this.input.right = true;
     } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
       this.input.down = true;
-      if (!event.repeat) {
-        this.beginDropThrough();
-      }
+      this.beginDropThrough();
     } else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
       if (!event.repeat) {
         this.input.jumpQueued = true;
@@ -442,7 +453,8 @@
       if (this.player.boostTimer <= 0) {
         this.player.boostTimer = 0;
         this.player.speed = this.player.baseSpeed;
-        this.player.jumpForce = this.player.baseJumpForce;
+        this.player.maxAirJumps = this.player.baseMaxAirJumps;
+        this.player.airJumpsLeft = Math.min(this.player.airJumpsLeft, this.player.maxAirJumps);
         this.statusText = 'Энергетик закончился';
         this.statusTimer = 0.8;
       }
@@ -497,10 +509,18 @@
       player.facing = 1;
     }
 
-    if (this.input.jumpQueued && player.onGround) {
-      player.vy = -player.jumpForce;
-      player.onGround = false;
-      this.audio.play('jump');
+    if (this.input.jumpQueued) {
+      if (player.onGround) {
+        player.vy = -player.jumpForce;
+        player.onGround = false;
+        player.supportPlatformIndex = -1;
+        this.audio.play('jump');
+      } else if (player.airJumpsLeft > 0) {
+        player.vy = -player.jumpForce;
+        player.airJumpsLeft -= 1;
+        this.audio.play('jump');
+        this.pushFloater(player.x, player.y - 6, 'x2');
+      }
     }
     this.input.jumpQueued = false;
 
@@ -513,9 +533,9 @@
 
     player.x += player.vx * dt;
     if (player.x > GAME_WIDTH) {
-      player.x = -player.w + 1;
+      player.x = -player.w;
     } else if (player.x + player.w < 0) {
-      player.x = GAME_WIDTH - 1;
+      player.x = GAME_WIDTH;
     }
 
     const previousY = player.y;
@@ -536,6 +556,7 @@
         player.vy = 0;
         player.onGround = true;
         player.supportPlatformIndex = i;
+        player.airJumpsLeft = player.maxAirJumps;
         break;
       }
     }
@@ -546,11 +567,12 @@
 
     if (player.y > GAME_HEIGHT + 24) {
       if (this.testMode) {
-        player.y = 560;
+        player.y = 530;
         player.vy = 0;
-        player.x = 110;
+        player.x = 90;
         player.dropThroughPlatformIndex = -1;
         player.supportPlatformIndex = -1;
+        player.airJumpsLeft = player.maxAirJumps;
         this.score = Math.max(0, this.score - 10);
         this.audio.play('hit');
         this.pushFloater(player.x, player.y, '-10');
