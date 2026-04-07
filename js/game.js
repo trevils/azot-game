@@ -5,6 +5,16 @@
   const WORLD_TOP = HUD_HEIGHT;
   const FLOOR_Y = 704;
   const GRAVITY = 1500;
+  const SPRITES = {
+    playerIdle: { sx: 1, sy: 1, sw: 14, sh: 30 },
+    playerWalk1: { sx: 16, sy: 1, sw: 15, sh: 30 },
+    playerWalk2: { sx: 33, sy: 1, sw: 14, sh: 30 },
+    playerJump: { sx: 48, sy: 1, sw: 17, sh: 29 },
+    box: { sx: 74, sy: 13, sw: 20, sh: 18 },
+    paper: { sx: 98, sy: 8, sw: 17, sh: 23 },
+    cart1: { sx: 167, sy: 8, sw: 27, sh: 23 },
+    cart2: { sx: 199, sy: 8, sw: 27, sh: 23 }
+  };
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -49,6 +59,7 @@
     this.input = {
       left: false,
       right: false,
+      down: false,
       jumpQueued: false
     };
 
@@ -137,8 +148,11 @@
       onGround: false,
       invulnerability: 0,
       boostTimer: 0,
+      supportPlatformIndex: 0,
+      dropThroughPlatformIndex: -1,
+      dropResumeY: 0,
       frameTime: 0,
-      frameIndex: 0,
+      frameIndex: 'playerIdle',
       facing: 1
     };
 
@@ -208,7 +222,7 @@
     const sizeMap = {
       ordinary: { w: 26, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
       urgent: { w: 24, h: 30, value: 20, gravityScale: 1, maxFallSpeed: 980 },
-      fragile: { w: 28, h: 26, value: 30, gravityScale: 0.45, maxFallSpeed: 340 }
+      fragile: { w: 28, h: 26, value: 30, gravityScale: 0.3, maxFallSpeed: 230 }
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
@@ -295,6 +309,21 @@
     this.cartCounter += 1;
   };
 
+  StorageRunner.prototype.beginDropThrough = function () {
+    const player = this.player;
+    if (!player.onGround || player.supportPlatformIndex <= 0) {
+      return;
+    }
+
+    const platform = this.platforms[player.supportPlatformIndex];
+    player.dropThroughPlatformIndex = player.supportPlatformIndex;
+    player.dropResumeY = platform.y + platform.h + 8;
+    player.supportPlatformIndex = -1;
+    player.onGround = false;
+    player.y += 4;
+    player.vy = Math.max(player.vy, 90);
+  };
+
   StorageRunner.prototype.onKeyDown = function (event) {
     if (!this.running || this.finished) {
       return;
@@ -304,6 +333,11 @@
       this.input.left = true;
     } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
       this.input.right = true;
+    } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
+      this.input.down = true;
+      if (!event.repeat) {
+        this.beginDropThrough();
+      }
     } else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
       if (!event.repeat) {
         this.input.jumpQueued = true;
@@ -319,6 +353,8 @@
       this.input.left = false;
     } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
       this.input.right = false;
+    } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
+      this.input.down = false;
     }
   };
 
@@ -468,14 +504,23 @@
     player.vy += GRAVITY * dt;
     player.invulnerability = Math.max(0, player.invulnerability - dt);
 
+    if (player.dropThroughPlatformIndex !== -1 && player.y > player.dropResumeY) {
+      player.dropThroughPlatformIndex = -1;
+    }
+
     player.x += player.vx * dt;
     player.x = clamp(player.x, 0, GAME_WIDTH - player.w);
 
     const previousY = player.y;
     player.y += player.vy * dt;
     player.onGround = false;
+    player.supportPlatformIndex = -1;
 
     for (let i = 0; i < this.platforms.length; i += 1) {
+      if (i === player.dropThroughPlatformIndex) {
+        continue;
+      }
+
       const platform = this.platforms[i];
       const wasAbove = previousY + player.h <= platform.y;
       const nowIntersect = rectsIntersect(player, platform);
@@ -483,6 +528,11 @@
         player.y = platform.y - player.h;
         player.vy = 0;
         player.onGround = true;
+        player.supportPlatformIndex = i;
+        if (i === 0) {
+          player.dropThroughPlatformIndex = -1;
+        }
+        break;
       }
     }
 
@@ -490,6 +540,7 @@
       player.y = WORLD_TOP + 40;
       player.vy = 0;
       player.x = 110;
+      player.dropThroughPlatformIndex = -1;
       this.score = Math.max(0, this.score - 10);
       this.audio.play('hit');
       this.pushFloater(player.x, player.y, '-10');
@@ -500,11 +551,11 @@
 
     player.frameTime += dt;
     if (Math.abs(player.vx) > 10 && player.onGround) {
-      player.frameIndex = Math.floor(player.frameTime * 10) % 2 === 0 ? 1 : 2;
+      player.frameIndex = Math.floor(player.frameTime * 10) % 2 === 0 ? 'playerWalk1' : 'playerWalk2';
     } else if (!player.onGround) {
-      player.frameIndex = 3;
+      player.frameIndex = 'playerJump';
     } else {
-      player.frameIndex = 0;
+      player.frameIndex = 'playerIdle';
     }
   };
 
@@ -596,7 +647,7 @@
             }
 
             item.y = platform.y - item.h + 2;
-            item.vy = 8;
+            item.vy = 6;
             item.platformIndex = null;
           } else if (platformIndex === item.targetStopPlatformIndex) {
             item.state = 'grounded';
@@ -707,20 +758,20 @@
     }
   };
 
-  StorageRunner.prototype.drawSprite = function (frame, x, y, w, h, flip) {
-    if (!this.sprites.complete) {
+  StorageRunner.prototype.drawSprite = function (frameName, x, y, w, h, flip) {
+    const frame = SPRITES[frameName];
+    if (!this.sprites.complete || !frame) {
       return;
     }
 
-    const sx = frame * 32;
     const ctx = this.ctx;
     ctx.save();
     if (flip) {
       ctx.translate(x + w, y);
       ctx.scale(-1, 1);
-      ctx.drawImage(this.sprites, sx, 0, 32, 32, 0, 0, w, h);
+      ctx.drawImage(this.sprites, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
     } else {
-      ctx.drawImage(this.sprites, sx, 0, 32, 32, x, y, w, h);
+      ctx.drawImage(this.sprites, frame.sx, frame.sy, frame.sw, frame.sh, x, y, w, h);
     }
     ctx.restore();
   };
@@ -817,8 +868,7 @@
       return;
     }
 
-    const frame = isUrgent ? 5 : 4;
-    this.drawSprite(frame, item.x, item.y, item.w, item.h, false);
+    this.drawSprite(isUrgent ? 'paper' : 'box', item.x, item.y, item.w, item.h, false);
 
     if (isUrgent) {
       ctx.save();
@@ -876,7 +926,7 @@
   StorageRunner.prototype.renderCarts = function (ctx) {
     for (let i = 0; i < this.carts.length; i += 1) {
       const cart = this.carts[i];
-      const frame = Math.floor(cart.anim) % 2 === 0 ? 6 : 7;
+      const frame = Math.floor(cart.anim) % 2 === 0 ? 'cart1' : 'cart2';
       this.drawSprite(frame, cart.x, cart.y, cart.w, cart.h, cart.dir < 0);
     }
   };
