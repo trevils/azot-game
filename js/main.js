@@ -198,13 +198,13 @@
 
     if (saveResult.rank > 10) {
       elements.endExtra.textContent = payload.reason === 'fall'
-        ? 'Ты выпал за нижний уровень. Таблица показывает топ-9 и твоё место.'
+        ? 'Ты получил производственную травму во время падения. Таблица показывает топ-9 и твоё место.'
         : 'Таблица показывает топ-9 и твоё место вместо 10-й строки.';
       elements.playerRank.textContent = 'Твоё место в общем рейтинге: ' + saveResult.rank;
       elements.playerRank.classList.remove('hidden');
     } else {
       elements.endExtra.textContent = payload.reason === 'fall'
-        ? 'Ты выпал за нижний уровень. Результат сохранён в таблицу.'
+        ? 'Ты получил производственную травму во время падения. Результат сохранён в таблицу.'
         : 'Результат сохранён в таблицу.';
       elements.playerRank.classList.add('hidden');
     }

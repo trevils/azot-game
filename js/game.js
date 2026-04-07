@@ -145,9 +145,9 @@
 
     this.player = {
       x: 90,
-      y: 530,
-      w: 34,
-      h: 72,
+      y: 450,
+      w: 25,
+      h: 55,
       vx: 0,
       vy: 0,
       baseSpeed: 270,
