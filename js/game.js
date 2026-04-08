@@ -3,19 +3,19 @@
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
   const WORLD_TOP = HUD_HEIGHT;
-  const FLOOR_Y = 704;
+  const FLOOR_Y = 710;
   const GRAVITY = 1500;
   const SPRITES = {
-    playerIdle: { sx: 1, sy: 1, sw: 14, sh: 30 },
-    playerWalk1: { sx: 16, sy: 1, sw: 15, sh: 30 },
-    playerWalk2: { sx: 33, sy: 1, sw: 14, sh: 30 },
-    playerJump: { sx: 48, sy: 1, sw: 17, sh: 29 },
-    box: { sx: 74, sy: 13, sw: 20, sh: 18 },
-    paper: { sx: 98, sy: 8, sw: 17, sh: 23 },
-    fragile: { sx: 117, sy: 10, sw: 22, sh: 21 },
-    energy: { sx: 145, sy: 11, sw: 13, sh: 20 },
-    cart1: { sx: 167, sy: 8, sw: 27, sh: 23 },
-    cart2: { sx: 199, sy: 8, sw: 27, sh: 23 }
+    playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
+    playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
+    playerWalk2: { sx: 36, sy: 1, sw: 15, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
+    playerJump: { sx: 52, sy: 1, sw: 18, sh: 29, rw: 30, rh: 57, ox: -2, oy: -2 },
+    box: { sx: 77, sy: 13, sw: 20, sh: 18 },
+    paper: { sx: 101, sy: 8, sw: 17, sh: 23 },
+    fragile: { sx: 120, sy: 13, sw: 20, sh: 18 },
+    energy: { sx: 147, sy: 12, sw: 12, sh: 19 },
+    cart1: { sx: 167, sy: 13, sw: 25, sh: 18 },
+    cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
   };
 
   function clamp(value, min, max) {
@@ -120,10 +120,9 @@
   StorageRunner.prototype.setupLevel = function () {
     this.platforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
-      { x: 20, y: 600, w: 210, h: 18, solid: true },
-      { x: 270, y: 600, w: 210, h: 18, solid: true },
-      { x: 520, y: 600, w: 220, h: 18, solid: true },
-      { x: 800, y: 600, w: 204, h: 18, solid: true },
+      { x: 40,  y: 600, w: 180, h: 18, solid: true },
+      { x: 260, y: 600, w: 504, h: 18, solid: true },
+      { x: 804, y: 600, w: 180, h: 18, solid: true },
 
       { x: 90, y: 515, w: 220, h: 18, solid: true },
       { x: 390, y: 505, w: 230, h: 18, solid: true },
@@ -756,9 +755,7 @@
 
       for (let itemIndex = this.collectibles.length - 1; itemIndex >= 0; itemIndex -= 1) {
         const item = this.collectibles[itemIndex];
-        if (item.state === 'grounded' &&
-            item.platformIndex === cart.platformIndex &&
-            rectsIntersect(cart, item)) {
+        if (rectsIntersect(cart, item)) {
           const penalty = item.type === 'urgent' ? 8 : 5;
           this.collectibles.splice(itemIndex, 1);
           this.score = Math.max(0, this.score - penalty);
@@ -958,27 +955,46 @@
     }
   };
 
+  StorageRunner.prototype.getPlayerDrawParams = function () {
+    const player = this.player;
+    const frame = SPRITES[player.frameIndex] || SPRITES.playerIdle;
+    return {
+      x: player.x + (frame.ox || 0),
+      y: player.y + (frame.oy || 0),
+      w: frame.rw || player.w,
+      h: frame.rh || player.h
+    };
+  };
+
   StorageRunner.prototype.renderPlayer = function (ctx) {
     const player = this.player;
+    const draw = this.getPlayerDrawParams();
     if (player.invulnerability > 0 && Math.floor(player.invulnerability * 14) % 2 === 0) {
       return;
     }
-    this.drawSprite(player.frameIndex, player.x, player.y, player.w, player.h, player.facing < 0);
+    this.drawSprite(
+      player.frameIndex,
+      draw.x,
+      draw.y,
+      draw.w,
+      draw.h,
+      player.facing < 0
+    );
 
     if (player.boostTimer > 0) {
       ctx.save();
       ctx.strokeStyle = 'rgba(132, 255, 184, 0.75)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(player.x - 3, player.y - 3, player.w + 6, player.h + 6);
+      ctx.strokeRect(draw.x - 3, draw.y - 3, draw.w + 6, draw.h + 6);
       ctx.restore();
     }
 
     if (this.testMode) {
       ctx.fillStyle = 'rgba(120, 184, 255, 0.12)';
-      ctx.fillRect(player.x - 10, player.y - 18, 58, 16);
+      ctx.fillRect(draw.x - 10, draw.y - 18, 58, 16);
       ctx.fillStyle = '#eaf5ff';
       ctx.font = '12px Segoe UI';
-      ctx.fillText('TEST', player.x, player.y - 6);
+      ctx.fillText('TEST', draw.x, draw.y - 6);
     }
   };
 
