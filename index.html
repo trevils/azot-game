@@ -24,9 +24,9 @@
               <li style="--delay: 0.26s;">Энергетик даёт ускорение и двойной прыжок на 5 секунд</li>
               <li style="--delay: 0.33s;">Space или P - пауза</li>
               <li style="--delay: 0.40s;">С краёв экрана можно выбежать и появиться с другой стороны</li>
-              <li style="--delay: 0.47s;">Не падай вниз уровня - это завершит смену</li>
+              <li style="--delay: 0.47s;">Падение вниз уровня отнимает 10 очков и 1 жизнь; после 3 падений смена заканчивается</li>
               <li style="--delay: 0.54s;">Коробка = 10 очков, заказ = 20 очков, хрупкий = 30 очков</li>
-              <li style="--delay: 0.61s;">Тележка может сбить тебя или увести заказ</li>
+              <li style="--delay: 0.61s;">Тележка может сбить тебя, увести заказ или разбить хрупкий заказ на -15 очков</li>
               <li style="--delay: 0.68s;">Имя <strong>tester</strong> включает тестовый режим</li>
             </ol>
           </div>
@@ -71,13 +71,15 @@
               <span class="hud-label">Очки</span>
               <span id="hud-score" class="hud-value">0</span>
             </div>
+            <div class="hud-card">
+              <span class="hud-label">Жизни</span>
+              <span id="hud-lives" class="hud-value">3</span>
+            </div>
           </div>
 
           <div class="hud-group hud-group-actions">
             <button id="pause-btn" class="icon-btn" type="button">Пауза</button>
             <button id="sound-btn" class="icon-btn" type="button">Звук: вкл</button>
-            <button id="font-down-btn" class="icon-btn" type="button">A-</button>
-            <button id="font-up-btn" class="icon-btn" type="button">A+</button>
             <button id="finish-btn" class="icon-btn" type="button">Сдать смену</button>
           </div>
         </div>

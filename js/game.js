@@ -5,6 +5,7 @@
   const WORLD_TOP = HUD_HEIGHT;
   const FLOOR_Y = 710;
   const GRAVITY = 1500;
+  const BOOST_DURATION = 5;
   const SPRITES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
@@ -50,6 +51,8 @@
     this.testMode = false;
     this.score = 0;
     this.timeLeft = 90;
+    this.maxLives = 3;
+    this.lives = 3;
     this.runTime = 0;
     this.orderSpawnTimer = 0;
     this.cartSpawnTimer = 0;
@@ -90,6 +93,8 @@
     this.bgOffset = 0;
     this.score = 0;
     this.timeLeft = 90;
+    this.maxLives = 3;
+    this.lives = this.maxLives;
     this.runTime = 0;
     this.orderSpawnTimer = 0.5;
     this.cartSpawnTimer = 1.2;
@@ -188,17 +193,17 @@
   };
 
   StorageRunner.prototype.getDifficulty = function () {
-    return clamp(this.runTime / 90, 0, 1);
+    return clamp(this.runTime / 55, 0, 1);
   };
 
   StorageRunner.prototype.getTargetActiveOrders = function () {
-    return 4 + Math.floor(this.getDifficulty() * 3);
+    return 5 + Math.floor(this.getDifficulty() * 5);
   };
 
   StorageRunner.prototype.chooseOrderType = function () {
     const difficulty = this.getDifficulty();
-    const fragileChance = 0.08 + difficulty * 0.18;
-    const urgentChance = 0.18 + difficulty * 0.20;
+    const fragileChance = 0.12 + difficulty * 0.28;
+    const urgentChance = 0.22 + difficulty * 0.28;
     const roll = Math.random();
 
     if (roll < fragileChance) {
@@ -289,7 +294,7 @@
   };
 
   StorageRunner.prototype.applyEnergyBoost = function () {
-    this.player.boostTimer = 5;
+    this.player.boostTimer = BOOST_DURATION;
     this.player.speed = this.player.baseSpeed + 85;
     this.player.maxAirJumps = 1;
     this.player.airJumpsLeft = Math.max(this.player.airJumpsLeft, 1);
@@ -303,7 +308,7 @@
     const difficulty = this.getDifficulty();
     const lane = this.cartLanes[Math.floor(Math.random() * this.cartLanes.length)];
     const fromLeft = Math.random() < 0.5;
-    const baseSpeed = 170 + difficulty * 80;
+    const baseSpeed = 190 + difficulty * 120;
 
     this.carts.push({
       id: this.cartCounter,
@@ -333,6 +338,49 @@
     player.onGround = false;
     player.y += 4;
     player.vy = Math.max(player.vy, 90);
+  };
+
+  StorageRunner.prototype.respawnPlayerAfterFall = function () {
+    const player = this.player;
+    player.x = 90;
+    player.y = 450;
+    player.vx = 0;
+    player.vy = 0;
+    player.onGround = false;
+    player.invulnerability = 1.2;
+    player.supportPlatformIndex = -1;
+    player.dropThroughPlatformIndex = -1;
+    player.dropResumeY = 0;
+    player.airJumpsLeft = player.maxAirJumps;
+  };
+
+  StorageRunner.prototype.handlePlayerFall = function () {
+    if (this.testMode) {
+      this.respawnPlayerAfterFall();
+      this.audio.play('hit');
+      this.flashTimer = 0.2;
+      this.pushFloater(this.player.x, this.player.y - 8, 'TEST');
+      this.statusText = 'Тестовый сброс после падения';
+      this.statusTimer = 0.9;
+      return;
+    }
+
+    this.score = Math.max(0, this.score - 10);
+    this.lives = Math.max(0, this.lives - 1);
+    this.audio.play('hit');
+    this.flashTimer = 0.2;
+
+    if (this.lives <= 0) {
+      this.statusText = 'Вы снова упали - игра окончена';
+      this.statusTimer = 1.2;
+      this.finishRun('fall');
+      return;
+    }
+
+    this.respawnPlayerAfterFall();
+    this.pushFloater(this.player.x, this.player.y - 8, '-10');
+    this.statusText = 'Падение: -10 очков, осталось жизней ' + this.lives;
+    this.statusTimer = 1.1;
   };
 
   StorageRunner.prototype.onKeyDown = function (event) {
@@ -393,6 +441,7 @@
         playerName: this.playerName,
         score: this.score,
         testMode: this.testMode,
+        lives: this.lives,
         reason: reason || 'complete'
       });
     }
@@ -471,13 +520,13 @@
     this.orderSpawnTimer -= dt;
     if (this.orderSpawnTimer <= 0 && this.collectibles.length < this.getTargetActiveOrders()) {
       this.spawnOrderFromTop();
-      this.orderSpawnTimer = 1.2 - this.getDifficulty() * 0.55 + Math.random() * 0.35;
+      this.orderSpawnTimer = 0.95 - this.getDifficulty() * 0.45 + Math.random() * 0.25;
     }
 
     this.cartSpawnTimer -= dt;
-    if (this.cartSpawnTimer <= 0 && this.carts.length < 2 + Math.floor(this.getDifficulty() * 3)) {
+    if (this.cartSpawnTimer <= 0 && this.carts.length < 3 + Math.floor(this.getDifficulty() * 5)) {
       this.spawnCart();
-      this.cartSpawnTimer = 3.3 - this.getDifficulty() * 1.6 + Math.random() * 0.5;
+      this.cartSpawnTimer = 2.4 - this.getDifficulty() * 1.45 + Math.random() * 0.35;
     }
 
     this.bonusSpawnTimer -= dt;
@@ -565,23 +614,8 @@
     }
 
     if (player.y > GAME_HEIGHT + 24) {
-      if (this.testMode) {
-        player.y = 530;
-        player.vy = 0;
-        player.x = 90;
-        player.dropThroughPlatformIndex = -1;
-        player.supportPlatformIndex = -1;
-        player.airJumpsLeft = player.maxAirJumps;
-        this.score = Math.max(0, this.score - 10);
-        this.audio.play('hit');
-        this.pushFloater(player.x, player.y, '-10');
-        this.flashTimer = 0.2;
-        this.statusText = 'Тестовый сброс после падения';
-        this.statusTimer = 0.9;
-      } else {
-        this.statusText = 'Падение вниз уровня';
-        this.statusTimer = 1.2;
-        this.finishRun('fall');
+      this.handlePlayerFall();
+      if (!this.running) {
         return;
       }
     }
@@ -756,12 +790,16 @@
       for (let itemIndex = this.collectibles.length - 1; itemIndex >= 0; itemIndex -= 1) {
         const item = this.collectibles[itemIndex];
         if (rectsIntersect(cart, item)) {
-          const penalty = item.type === 'urgent' ? 8 : 5;
+          const penalty = item.type === 'fragile' ? 15 : item.type === 'urgent' ? 8 : 5;
           this.collectibles.splice(itemIndex, 1);
           this.score = Math.max(0, this.score - penalty);
-          this.statusText = item.type === 'urgent'
-            ? 'Тележка увезла срочный заказ'
-            : 'Тележка увезла заказ';
+          if (item.type === 'fragile') {
+            this.statusText = 'Тележка разбила хрупкий заказ';
+          } else if (item.type === 'urgent') {
+            this.statusText = 'Тележка увезла срочный заказ';
+          } else {
+            this.statusText = 'Тележка увезла заказ';
+          }
           this.statusTimer = 0.85;
           this.pushFloater(item.x, item.y, '-' + penalty);
         }
@@ -782,13 +820,19 @@
     });
   };
 
+  StorageRunner.prototype.getUiFontSize = function () {
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    return parseFloat(rootStyle.getPropertyValue('--ui-font-size')) || 16;
+  };
+
   StorageRunner.prototype.updateHud = function () {
     if (typeof this.options.onHudUpdate === 'function') {
       this.options.onHudUpdate({
         playerName: this.playerName,
         testMode: this.testMode,
         score: this.score,
-        timeLeft: this.timeLeft
+        timeLeft: this.timeLeft,
+        lives: this.lives
       });
     }
   };
@@ -982,10 +1026,13 @@
     );
 
     if (player.boostTimer > 0) {
+      const boostRatio = clamp(player.boostTimer / BOOST_DURATION, 0, 1);
       ctx.save();
       ctx.strokeStyle = 'rgba(132, 255, 184, 0.75)';
       ctx.lineWidth = 2;
       ctx.strokeRect(draw.x - 3, draw.y - 3, draw.w + 6, draw.h + 6);
+      ctx.fillStyle = 'rgba(132, 255, 184, 0.85)';
+      ctx.fillRect(draw.x, draw.y - 8, draw.w * boostRatio, 4);
       ctx.restore();
     }
 
@@ -993,14 +1040,14 @@
       ctx.fillStyle = 'rgba(120, 184, 255, 0.12)';
       ctx.fillRect(draw.x - 10, draw.y - 18, 58, 16);
       ctx.fillStyle = '#eaf5ff';
-      ctx.font = '12px Segoe UI';
+      ctx.font = Math.max(10, Math.round(this.getUiFontSize() * 0.75)) + 'px Segoe UI';
       ctx.fillText('TEST', draw.x, draw.y - 6);
     }
   };
 
   StorageRunner.prototype.renderFloaters = function (ctx) {
     ctx.save();
-    ctx.font = 'bold 18px Segoe UI';
+    ctx.font = 'bold ' + Math.round(this.getUiFontSize() * 1.125) + 'px Segoe UI';
     ctx.textAlign = 'center';
 
     for (let i = 0; i < this.floaters.length; i += 1) {
@@ -1026,7 +1073,7 @@
     ctx.strokeStyle = 'rgba(147, 189, 255, 0.2)';
     ctx.strokeRect(320, 88, 384, 40);
     ctx.fillStyle = '#eef7ff';
-    ctx.font = '600 20px Segoe UI';
+    ctx.font = '600 ' + Math.round(this.getUiFontSize() * 1.25) + 'px Segoe UI';
     ctx.textAlign = 'center';
     ctx.fillText(this.statusText, 512, 114);
     ctx.restore();

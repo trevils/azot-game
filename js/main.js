@@ -17,10 +17,9 @@
     hudMode: document.getElementById('hud-mode'),
     hudTimer: document.getElementById('hud-timer'),
     hudScore: document.getElementById('hud-score'),
+    hudLives: document.getElementById('hud-lives'),
     pauseButton: document.getElementById('pause-btn'),
     soundButton: document.getElementById('sound-btn'),
-    fontDownButton: document.getElementById('font-down-btn'),
-    fontUpButton: document.getElementById('font-up-btn'),
     finishButton: document.getElementById('finish-btn'),
 
     pauseOverlay: document.getElementById('pause-overlay'),
@@ -81,6 +80,7 @@
     elements.hudMode.textContent = payload.testMode ? 'TEST MODE' : 'Обычный';
     elements.hudTimer.textContent = payload.testMode ? '∞' : formatTime(payload.timeLeft);
     elements.hudScore.textContent = String(payload.score);
+    elements.hudLives.textContent = String(payload.lives);
   }
 
   function escapeHtml(value) {
@@ -188,7 +188,7 @@
     }
 
     if (payload.reason === 'fall') {
-      elements.endSummary.textContent = 'Смена провалена: ' + payload.score + ' очков';
+      elements.endSummary.textContent = 'Смена завершена после 3 падений: ' + payload.score + ' очков';
     } else {
       elements.endSummary.textContent = 'Итог: ' + payload.score + ' очков';
     }
@@ -198,13 +198,13 @@
 
     if (saveResult.rank > 10) {
       elements.endExtra.textContent = payload.reason === 'fall'
-        ? 'Ты получил производственную травму во время падения. Таблица показывает топ-9 и твоё место.'
+        ? 'Лимит падений исчерпан. Таблица показывает топ-9 и твоё место.'
         : 'Таблица показывает топ-9 и твоё место вместо 10-й строки.';
       elements.playerRank.textContent = 'Твоё место в общем рейтинге: ' + saveResult.rank;
       elements.playerRank.classList.remove('hidden');
     } else {
       elements.endExtra.textContent = payload.reason === 'fall'
-        ? 'Ты получил производственную травму во время падения. Результат сохранён в таблицу.'
+        ? 'Лимит падений исчерпан. Результат сохранён в таблицу.'
         : 'Результат сохранён в таблицу.';
       elements.playerRank.classList.add('hidden');
     }
@@ -287,12 +287,6 @@
     }
   }
 
-  elements.fontDownButton.addEventListener('click', function () {
-    changeFont(-1);
-  });
-  elements.fontUpButton.addEventListener('click', function () {
-    changeFont(1);
-  });
   elements.startFontDown.addEventListener('click', function () {
     changeFont(-1);
   });
