@@ -1,10 +1,11 @@
-(function () {
+﻿(function () {
   const GAME_WIDTH = 1024;
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
   const WORLD_TOP = HUD_HEIGHT;
   const FLOOR_Y = 710;
   const GRAVITY = 1500;
+  const COYOTE_TIME = 0.08;
   const BOOST_DURATION = 5;
   const SPRITES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
@@ -162,6 +163,7 @@
       maxAirJumps: 0,
       airJumpsLeft: 0,
       onGround: false,
+      coyoteTimer: 0,
       invulnerability: 0,
       boostTimer: 0,
       supportPlatformIndex: -1,
@@ -352,6 +354,7 @@
     player.dropThroughPlatformIndex = -1;
     player.dropResumeY = 0;
     player.airJumpsLeft = player.maxAirJumps;
+    player.coyoteTimer = 0;
   };
 
   StorageRunner.prototype.handlePlayerFall = function () {
@@ -558,9 +561,10 @@
     }
 
     if (this.input.jumpQueued) {
-      if (player.onGround) {
+      if (player.onGround || player.coyoteTimer > 0) {
         player.vy = -player.jumpForce;
         player.onGround = false;
+        player.coyoteTimer = 0;
         player.supportPlatformIndex = -1;
         this.audio.play('jump');
       } else if (player.airJumpsLeft > 0) {
@@ -574,6 +578,7 @@
 
     player.vy += GRAVITY * dt;
     player.invulnerability = Math.max(0, player.invulnerability - dt);
+    player.coyoteTimer = Math.max(0, player.coyoteTimer - dt);
 
     if (player.dropThroughPlatformIndex !== -1 && player.y > player.dropResumeY) {
       player.dropThroughPlatformIndex = -1;
@@ -587,6 +592,7 @@
     }
 
     const previousY = player.y;
+    const wasOnGround = player.onGround;
     player.y += player.vy * dt;
     player.onGround = false;
     player.supportPlatformIndex = -1;
@@ -603,10 +609,15 @@
         player.y = platform.y - player.h;
         player.vy = 0;
         player.onGround = true;
+        player.coyoteTimer = COYOTE_TIME;
         player.supportPlatformIndex = i;
         player.airJumpsLeft = player.maxAirJumps;
         break;
       }
+    }
+
+    if (!player.onGround && wasOnGround && player.dropThroughPlatformIndex === -1) {
+      player.coyoteTimer = COYOTE_TIME;
     }
 
     if (player.onGround && this.input.down && player.supportPlatformIndex > 0) {
@@ -855,6 +866,52 @@
     ctx.restore();
   };
 
+  StorageRunner.prototype.drawMetalPanel = function (ctx, x, y, w, h, palette) {
+    const colors = palette || {};
+    ctx.save();
+    ctx.fillStyle = colors.base || '#273445';
+    ctx.fillRect(x, y, w, h);
+
+    ctx.fillStyle = colors.top || 'rgba(214, 230, 238, 0.16)';
+    ctx.fillRect(x, y, w, Math.max(3, Math.floor(h * 0.18)));
+
+    ctx.fillStyle = colors.bottom || 'rgba(7, 12, 18, 0.22)';
+    ctx.fillRect(x, y + h - Math.max(3, Math.floor(h * 0.2)), w, Math.max(3, Math.floor(h * 0.2)));
+
+    ctx.strokeStyle = colors.stroke || '#5d7484';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+
+    ctx.strokeStyle = colors.innerStroke || 'rgba(13, 24, 36, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
+
+    ctx.fillStyle = colors.detail || 'rgba(12, 22, 32, 0.32)';
+    ctx.fillRect(x + 8, y + 8, w - 16, h - 16);
+    ctx.restore();
+  };
+
+  StorageRunner.prototype.drawHazardStrip = function (ctx, x, y, w, h, offset) {
+    const stripeWidth = 12;
+    const shift = ((offset || 0) % (stripeWidth * 2) + (stripeWidth * 2)) % (stripeWidth * 2);
+    ctx.save();
+    ctx.fillStyle = '#e2ad33';
+    ctx.fillRect(x, y, w, h);
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.strokeStyle = '#11151b';
+    ctx.lineWidth = 6;
+
+    for (let sx = x - h - stripeWidth * 2 + shift; sx < x + w + h + stripeWidth * 2; sx += stripeWidth * 2) {
+      ctx.beginPath();
+      ctx.moveTo(sx, y + h);
+      ctx.lineTo(sx + h + stripeWidth, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
   StorageRunner.prototype.render = function () {
     const ctx = this.ctx;
 
@@ -876,53 +933,146 @@
   };
 
   StorageRunner.prototype.renderBackground = function (ctx) {
-    ctx.fillStyle = '#0a1526';
+    ctx.fillStyle = '#0d1116';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+    bgGradient.addColorStop(0, '#272e34');
+    bgGradient.addColorStop(0.22, '#22292f');
+    bgGradient.addColorStop(0.62, '#171d23');
+    bgGradient.addColorStop(1, '#0f1318');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, WORLD_TOP, GAME_WIDTH, GAME_HEIGHT - WORLD_TOP);
+
+    ctx.fillStyle = 'rgba(72, 222, 240, 0.06)';
+    ctx.fillRect(0, WORLD_TOP + 24, 90, GAME_HEIGHT - WORLD_TOP - 150);
+    ctx.fillRect(GAME_WIDTH - 84, WORLD_TOP + 46, 84, GAME_HEIGHT - WORLD_TOP - 180);
+
+    ctx.fillStyle = 'rgba(24, 31, 39, 0.78)';
+    for (let x = 0; x <= GAME_WIDTH; x += 128) {
+      ctx.fillRect(x, WORLD_TOP, 10, GAME_HEIGHT - WORLD_TOP);
+    }
+
+    ctx.fillStyle = 'rgba(112, 123, 132, 0.1)';
+    for (let y = WORLD_TOP + 52; y < FLOOR_Y - 40; y += 118) {
+      ctx.fillRect(0, y, GAME_WIDTH, 5);
+    }
+
     if (this.bgTile.complete) {
-      const pattern = ctx.createPattern(this.bgTile, 'repeat');
-      if (pattern) {
-        ctx.save();
-        ctx.translate(-this.bgOffset, 0);
-        ctx.fillStyle = pattern;
-        ctx.fillRect(this.bgOffset - 64, WORLD_TOP, GAME_WIDTH + 128, GAME_HEIGHT - WORLD_TOP);
-        ctx.restore();
+        const pattern = ctx.createPattern(this.bgTile, 'repeat');
+        if (pattern) {
+          ctx.save();
+          ctx.translate(-this.bgOffset, 0);
+          ctx.globalAlpha = 0.06;
+          ctx.fillStyle = pattern;
+          ctx.fillRect(this.bgOffset - 64, WORLD_TOP, GAME_WIDTH + 128, GAME_HEIGHT - WORLD_TOP);
+          ctx.restore();
+        }
+      }
+
+    for (let i = 0; i < 7; i += 1) {
+      const lampX = 72 + i * 142;
+      const blink = 0.55 + 0.45 * Math.sin((this.bgOffset * 0.05) + i);
+      ctx.fillStyle = 'rgba(135, 249, 255,' + (0.06 + blink * 0.05).toFixed(3) + ')';
+      ctx.fillRect(lampX - 26, WORLD_TOP + 20, 52, 18);
+      this.drawMetalPanel(ctx, lampX - 30, WORLD_TOP + 14, 60, 30, {
+        base: '#47545b',
+        top: 'rgba(236, 243, 247, 0.18)',
+        bottom: 'rgba(13, 18, 24, 0.32)',
+        stroke: '#605851',
+        innerStroke: 'rgba(31, 44, 51, 0.72)',
+        detail: 'rgba(16, 27, 37, 0.38)'
+      });
+    }
+
+    const lightWidth = 74;
+    const lightSpacing = 126;
+    const lightOffset = (this.bgOffset * 0.4) % lightSpacing;
+    for (let x = -lightWidth - lightOffset; x < GAME_WIDTH + lightWidth; x += lightSpacing) {
+      ctx.fillStyle = 'rgba(150, 235, 244, 0.03)';
+      ctx.fillRect(x, WORLD_TOP + 86, lightWidth, 6);
+      ctx.fillStyle = 'rgba(71, 212, 232, 0.05)';
+      ctx.fillRect(x + 12, WORLD_TOP + 84, lightWidth - 24, 2);
+    }
+
+    for (let y = WORLD_TOP + 128; y < FLOOR_Y - 36; y += 156) {
+      for (let x = 22; x < GAME_WIDTH - 90; x += 192) {
+        this.drawMetalPanel(ctx, x, y, 112, 76, {
+          base: '#2b343c',
+          top: 'rgba(223, 232, 236, 0.12)',
+          bottom: 'rgba(12, 18, 24, 0.28)',
+          stroke: '#536673',
+          innerStroke: 'rgba(24, 35, 44, 0.72)',
+          detail: 'rgba(17, 25, 33, 0.32)'
+        });
       }
     }
 
-    for (let i = 0; i < 8; i += 1) {
-      const lampX = 90 + i * 115;
-      const blink = 0.55 + 0.45 * Math.sin((this.bgOffset * 0.05) + i);
-      ctx.fillStyle = 'rgba(123, 192, 255,' + (0.25 + blink * 0.2).toFixed(3) + ')';
-      ctx.beginPath();
-      ctx.arc(lampX, WORLD_TOP + 36, 6, 0, Math.PI * 2);
-      ctx.fill();
+    for (let pipeY = WORLD_TOP + 142; pipeY < FLOOR_Y - 60; pipeY += 148) {
+      ctx.fillStyle = '#7e8a90';
+      ctx.fillRect(0, pipeY, GAME_WIDTH, 6);
+      ctx.fillStyle = 'rgba(56, 64, 70, 0.45)';
+      ctx.fillRect(0, pipeY + 4, GAME_WIDTH, 2);
     }
 
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    for (let i = 0; i < 12; i += 1) {
-      const x = ((i * 120) + this.bgOffset * 0.4) % (GAME_WIDTH + 80) - 40;
-      ctx.fillRect(x, WORLD_TOP + 74, 80, 8);
+    for (let pipeX = 116; pipeX < GAME_WIDTH; pipeX += 256) {
+      ctx.fillStyle = '#848f95';
+      ctx.fillRect(pipeX, WORLD_TOP, 6, FLOOR_Y - WORLD_TOP - 16);
+      ctx.fillStyle = 'rgba(58, 67, 74, 0.48)';
+      ctx.fillRect(pipeX + 4, WORLD_TOP, 2, FLOOR_Y - WORLD_TOP - 16);
     }
 
-    ctx.fillStyle = '#10213b';
-    ctx.fillRect(0, FLOOR_Y - 10, GAME_WIDTH, 10);
-    ctx.fillStyle = '#2b0e18';
+    this.drawMetalPanel(ctx, 0, FLOOR_Y - 22, GAME_WIDTH, 22, {
+      base: '#39444d',
+      top: 'rgba(214, 226, 231, 0.22)',
+      bottom: 'rgba(10, 14, 18, 0.34)',
+      stroke: '#6d7f89',
+      innerStroke: 'rgba(27, 36, 46, 0.8)',
+      detail: 'rgba(22, 32, 41, 0.36)'
+    });
+    this.drawHazardStrip(ctx, 0, FLOOR_Y - 18, GAME_WIDTH, 10, this.bgOffset * 0.15);
+
+    const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, GAME_HEIGHT);
+    floorGradient.addColorStop(0, '#1a222b');
+    floorGradient.addColorStop(1, '#0d1116');
+    ctx.fillStyle = floorGradient;
     ctx.fillRect(0, FLOOR_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_Y);
-    ctx.fillStyle = 'rgba(255, 86, 86, 0.55)';
-    ctx.fillRect(0, FLOOR_Y + 4, GAME_WIDTH, 4);
   };
 
   StorageRunner.prototype.renderPlatforms = function (ctx) {
     for (let i = 1; i < this.platforms.length; i += 1) {
       const p = this.platforms[i];
-      ctx.fillStyle = '#193052';
-      ctx.fillRect(p.x, p.y, p.w, p.h);
-      ctx.fillStyle = '#2e5189';
-      ctx.fillRect(p.x, p.y, p.w, 4);
-      for (let x = p.x + 12; x < p.x + p.w - 12; x += 34) {
-        ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        ctx.fillRect(x, p.y + 6, 18, 7);
+      this.drawMetalPanel(ctx, p.x, p.y, p.w, p.h, {
+        base: '#70808d',
+        top: 'rgba(228, 237, 241, 0.18)',
+        bottom: 'rgba(18, 23, 29, 0.34)',
+        stroke: '#93a5b1',
+        innerStroke: 'rgba(40, 53, 65, 0.82)',
+        detail: 'rgba(40, 56, 71, 0.28)'
+      });
+
+      const accentGradient = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.h);
+      accentGradient.addColorStop(0, 'rgba(186, 106, 62, 0.28)');
+      accentGradient.addColorStop(1, 'rgba(126, 74, 47, 0.08)');
+      ctx.fillStyle = accentGradient;
+      ctx.fillRect(p.x + 10, p.y + 3, Math.max(20, p.w - 20), 3);
+
+      for (let x = p.x + 16; x < p.x + p.w - 14; x += 44) {
+        ctx.fillStyle = 'rgba(219, 232, 238, 0.16)';
+        ctx.fillRect(x, p.y + 6, 22, 2);
+      }
+
+      for (let x = p.x + 20; x < p.x + p.w - 18; x += 72) {
+        ctx.fillStyle = 'rgba(164, 94, 56, 0.55)';
+        ctx.fillRect(x, p.y + p.h - 5, 18, 2);
+        ctx.fillStyle = 'rgba(216, 171, 132, 0.18)';
+        ctx.fillRect(x, p.y + p.h - 7, 18, 1);
+      }
+
+      if (i !== 1) {
+        ctx.fillStyle = 'rgba(30, 39, 48, 0.65)';
+        ctx.fillRect(p.x + 12, p.y + p.h, 10, 12);
+        ctx.fillRect(p.x + p.w - 22, p.y + p.h, 10, 12);
       }
     }
   };
@@ -1028,10 +1178,10 @@
     if (player.boostTimer > 0) {
       const boostRatio = clamp(player.boostTimer / BOOST_DURATION, 0, 1);
       ctx.save();
-      ctx.strokeStyle = 'rgba(132, 255, 184, 0.75)';
+      ctx.strokeStyle = 'rgba(82, 255, 123, 0.68)';
       ctx.lineWidth = 2;
       ctx.strokeRect(draw.x - 3, draw.y - 3, draw.w + 6, draw.h + 6);
-      ctx.fillStyle = 'rgba(132, 255, 184, 0.85)';
+      ctx.fillStyle = 'rgba(75, 255, 162, 0.85)';
       ctx.fillRect(draw.x, draw.y - 8, draw.w * boostRatio, 4);
       ctx.restore();
     }
@@ -1068,11 +1218,21 @@
     }
 
     ctx.save();
-    ctx.fillStyle = 'rgba(8, 18, 34, 0.72)';
-    ctx.fillRect(320, 88, 384, 40);
-    ctx.strokeStyle = 'rgba(147, 189, 255, 0.2)';
-    ctx.strokeRect(320, 88, 384, 40);
-    ctx.fillStyle = '#eef7ff';
+    this.drawMetalPanel(ctx, 314, 84, 396, 48, {
+      base: 'rgba(39, 49, 60, 0.95)',
+      top: 'rgba(219, 231, 236, 0.18)',
+      bottom: 'rgba(11, 16, 21, 0.35)',
+      stroke: 'rgba(109, 134, 145, 0.88)',
+      innerStroke: 'rgba(23, 32, 40, 0.9)',
+      detail: 'rgba(16, 24, 31, 0.4)'
+    });
+    const statusGlow = ctx.createLinearGradient(314, 84, 710, 84);
+    statusGlow.addColorStop(0, 'rgba(101, 215, 232, 0.2)');
+    statusGlow.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
+    statusGlow.addColorStop(1, 'rgba(101, 215, 232, 0.12)');
+    ctx.fillStyle = statusGlow;
+    ctx.fillRect(320, 90, 384, 4);
+    ctx.fillStyle = '#eff9fb';
     ctx.font = '600 ' + Math.round(this.getUiFontSize() * 1.25) + 'px Segoe UI';
     ctx.textAlign = 'center';
     ctx.fillText(this.statusText, 512, 114);

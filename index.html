@@ -3,20 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Склад Азот: Собирай Заказы!</title>
+  <title>Склад Азот: Собирай заказы!</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="page-shell">
-    <main class="app" aria-label="Игра Склад Азот: Собирай Заказы!">
+    <main class="app" aria-label="Игра Склад Азот: Собирай заказы!">
       <section id="start-screen" class="screen active">
         <div class="screen-panel start-panel">
-          <p class="eyebrow">2D платформер</p>
-          <h1 class="game-title">Склад Азот: Собирай Заказы!</h1>
-          <p class="subtitle">Собирай заказы быстрее других работников! Избегай тележек, чтобы не потерять очки.</p>
+          <div class="start-top">
+            <div class="start-title-copy">
+              <p class="eyebrow">2D платформер</p>
+              <h1 class="game-title">Склад Азот: Собирай заказы!</h1>
+              <p class="subtitle">Собирай заказы быстрее других работников! Избегай тележек, чтобы не потерять очки.</p>
+            </div>
+          </div>
 
           <div class="instructions">
-            <h2>Как играть</h2>
+            <div class="instructions-head">
+              <h2>Как играть</h2>
+              <img class="start-gif" src="assets/instruction.gif" alt="" aria-hidden="true">
+            </div>
             <ol>
               <li style="--delay: 0.05s;">A / D или ← / → - движение</li>
               <li style="--delay: 0.12s;">S / ↓ - спуск сквозь платформы</li>
@@ -26,7 +33,7 @@
               <li style="--delay: 0.40s;">С краёв экрана можно выбежать и появиться с другой стороны</li>
               <li style="--delay: 0.47s;">Падение вниз уровня отнимает 10 очков; после 3 падений смена заканчивается</li>
               <li style="--delay: 0.54s;">Обычный заказ = 10 очков, срочный = 20 очков, хрупкий = 30 очков</li>
-              <li style="--delay: 0.61s;">Тележка может сбить тебя, увести заказ или разбить хрупкий заказ</li>
+              <li style="--delay: 0.61s;">Тележка может сбить тебя, увезти заказ или разбить хрупкий заказ</li>
               <li style="--delay: 0.68s;">Имя <strong>tester</strong> включает тестовый режим</li>
             </ol>
           </div>
@@ -97,7 +104,7 @@
 
       <section id="end-screen" class="screen" aria-hidden="true">
         <div class="screen-panel end-panel">
-          <p class="eyebrow">Отчет работника</p>
+          <p class="eyebrow">Отчёт работника</p>
           <h2>Смена завершена</h2>
           <p id="end-summary" class="end-summary">Итог: 0 очков</p>
           <p id="end-extra" class="end-extra">Результат сохранён в таблицу.</p>
@@ -120,7 +127,7 @@
 
           <div class="end-actions">
             <button id="restart-btn" class="primary-btn" type="button">Начать снова</button>
-            <button id="back-btn" class="icon-btn" type="button">К старту</button>
+            <button id="back-btn" class="icon-btn" type="button">В меню</button>
           </div>
         </div>
       </section>

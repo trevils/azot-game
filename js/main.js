@@ -104,7 +104,7 @@
   }
 
   function renderLeaderboard(result) {
-    const scores = result && result.top10 ? result.top10 : window.AZOTStorage.loadScores();
+    const scores = result && result.top10 ? result.top10 : window.AZOTStorage.loadScores().slice(0, 10);
     elements.leaderboardBody.innerHTML = '';
 
     if (!scores.length) {
@@ -120,7 +120,7 @@
       });
       elements.leaderboardBody.appendChild(
         createLeaderboardRow(
-          result.rank,
+          10,
           result.playerEntry.name,
           result.playerEntry.score,
           'leaderboard-row-own'
@@ -129,7 +129,7 @@
       return;
     }
 
-    scores.forEach(function (entry, index) {
+    scores.slice(0, 10).forEach(function (entry, index) {
       elements.leaderboardBody.appendChild(
         createLeaderboardRow(index + 1, entry.name, entry.score, '')
       );
@@ -198,8 +198,8 @@
 
     if (saveResult.rank > 10) {
       elements.endExtra.textContent = payload.reason === 'fall'
-        ? 'Лимит падений исчерпан. Таблица показывает топ-9 и твоё место.'
-        : 'Таблица показывает топ-9 и твоё место вместо 10-й строки.';
+        ? 'Лимит падений исчерпан. Таблица показывает 10 строк: 1-9 и твой текущий результат в 10-й строке.'
+        : 'Таблица показывает 10 строк: 1-9 и твой текущий результат в 10-й строке.';
       elements.playerRank.textContent = 'Твоё место в общем рейтинге: ' + saveResult.rank;
       elements.playerRank.classList.remove('hidden');
     } else {
