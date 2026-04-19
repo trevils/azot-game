@@ -1,26 +1,46 @@
 (function () {
+  // Короткие сигналы для интерфейса и смены.
+  const cueBank = {
+    click: { frequency: 420, duration: 0.06, wave: "square", volume: 0.025, glide: 0 },
+    jump: { frequency: 310, duration: 0.12, wave: "square", volume: 0.03, glide: 120 },
+    pickup: { frequency: 620, duration: 0.08, wave: "triangle", volume: 0.04, glide: 80 },
+    pickupRare: { frequency: 740, duration: 0.1, wave: "triangle", volume: 0.05, glide: 160 },
+    hit: { frequency: 180, duration: 0.14, wave: "sawtooth", volume: 0.05, glide: -60 }
+  };
+
   function AudioManager(enabled) {
     this.enabled = enabled !== false;
     this.context = null;
     this.ambientTimer = null;
   }
 
+  // Контекст создаём лениво, когда браузер уже готов дать звук.
   AudioManager.prototype.ensureContext = function () {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextCtor) {
+      return null;
+    }
+
     if (!this.context) {
-      const Context = window.AudioContext || window.webkitAudioContext;
-      if (!Context) {
+      try {
+        this.context = new AudioContextCtor();
+      } catch (error) {
+        this.context = null;
         return null;
       }
-      this.context = new Context();
     }
-    if (this.context.state === 'suspended') {
-      this.context.resume();
+
+    if (this.context.state === "suspended") {
+      this.context.resume().catch(function () {});
     }
+
     return this.context;
   };
 
   AudioManager.prototype.setEnabled = function (enabled) {
     this.enabled = !!enabled;
+
     if (!this.enabled) {
       this.stopAmbient();
     }
@@ -28,120 +48,93 @@
 
   AudioManager.prototype.toggle = function () {
     this.setEnabled(!this.enabled);
+
     if (this.enabled) {
-      this.play('click');
+      this.play("click");
     }
+
     return this.enabled;
   };
 
-  AudioManager.prototype.play = function (type) {
-    if (!this.enabled) {
-      return;
-    }
+  // Если звук недоступен, просто выходим без ошибок наверх.
+  AudioManager.prototype.play = function (cueName) {
+    const cue = cueBank[cueName] || cueBank.click;
+    const context = this.enabled ? this.ensureContext() : null;
 
-    const context = this.ensureContext();
     if (!context) {
       return;
     }
 
-    const now = context.currentTime;
-    let frequency = 220;
-    let duration = 0.08;
-    let wave = 'square';
-    let volume = 0.03;
-    let glide = 0;
-
-    switch (type) {
-      case 'jump':
-        frequency = 310;
-        duration = 0.12;
-        wave = 'square';
-        glide = 120;
-        break;
-      case 'pickup':
-        frequency = 620;
-        duration = 0.08;
-        wave = 'triangle';
-        volume = 0.04;
-        glide = 80;
-        break;
-      case 'pickupRare':
-        frequency = 740;
-        duration = 0.1;
-        wave = 'triangle';
-        volume = 0.05;
-        glide = 160;
-        break;
-      case 'hit':
-        frequency = 180;
-        duration = 0.14;
-        wave = 'sawtooth';
-        volume = 0.05;
-        glide = -60;
-        break;
-      default:
-        frequency = 420;
-        duration = 0.06;
-        wave = 'square';
-        volume = 0.025;
-        glide = 0;
-        break;
-    }
-
-    this.playTone(frequency, duration, wave, volume, glide, now);
+    this.scheduleTone(cue, context.currentTime);
   };
 
-  AudioManager.prototype.playTone = function (frequency, duration, wave, volume, glide, when) {
+  AudioManager.prototype.scheduleTone = function (cue, startAt) {
     const context = this.context;
+    let oscillator;
+    let gainNode;
+
     if (!context) {
       return;
     }
 
-    const oscillator = context.createOscillator();
-    const gainNode = context.createGain();
+    oscillator = context.createOscillator();
+    gainNode = context.createGain();
 
-    oscillator.type = wave;
-    oscillator.frequency.setValueAtTime(frequency, when);
-    if (glide) {
-      oscillator.frequency.linearRampToValueAtTime(Math.max(40, frequency + glide), when + duration);
+    oscillator.type = cue.wave;
+    oscillator.frequency.setValueAtTime(cue.frequency, startAt);
+
+    if (cue.glide) {
+      oscillator.frequency.linearRampToValueAtTime(
+        Math.max(40, cue.frequency + cue.glide),
+        startAt + cue.duration
+      );
     }
 
-    gainNode.gain.setValueAtTime(0.0001, when);
-    gainNode.gain.exponentialRampToValueAtTime(volume, when + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+    gainNode.gain.setValueAtTime(0.0001, startAt);
+    gainNode.gain.exponentialRampToValueAtTime(cue.volume, startAt + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + cue.duration);
 
     oscillator.connect(gainNode);
     gainNode.connect(context.destination);
-    oscillator.start(when);
-    oscillator.stop(when + duration + 0.02);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + cue.duration + 0.02);
   };
 
+  // Фоновый гул склада гоняем отдельным таймером.
   AudioManager.prototype.startAmbient = function () {
+    const depot = this;
+
     if (!this.enabled || this.ambientTimer) {
       return;
     }
 
-    const self = this;
-    this.ensureContext();
+    if (!this.ensureContext()) {
+      return;
+    }
 
     this.ambientTimer = window.setInterval(function () {
-      if (!self.enabled || !self.context) {
+      const context = depot.enabled ? depot.ensureContext() : null;
+
+      if (!context) {
         return;
       }
-      const start = self.context.currentTime;
-      self.playTone(110, 0.18, 'sine', 0.01, 0, start);
-      self.playTone(164, 0.22, 'sine', 0.008, 18, start + 0.12);
+
+      depot.scheduleTone({ frequency: 110, duration: 0.18, wave: "sine", volume: 0.01, glide: 0 }, context.currentTime);
+      depot.scheduleTone({ frequency: 164, duration: 0.22, wave: "sine", volume: 0.008, glide: 18 }, context.currentTime + 0.12);
     }, 2800);
   };
 
   AudioManager.prototype.stopAmbient = function () {
-    if (this.ambientTimer) {
-      window.clearInterval(this.ambientTimer);
-      this.ambientTimer = null;
+    if (!this.ambientTimer) {
+      return;
     }
+
+    window.clearInterval(this.ambientTimer);
+    this.ambientTimer = null;
   };
 
   window.AZOTAudio = {
+    AzotDepot: AudioManager,
     AudioManager: AudioManager
   };
 })();

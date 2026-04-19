@@ -7,22 +7,24 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div class="page-shell">
-    <main class="app" aria-label="Игра Склад Азот: Собирай заказы!">
-      <section id="start-screen" class="screen active">
-        <div class="screen-panel start-panel">
-          <div class="start-top">
-            <div class="start-title-copy">
-              <p class="eyebrow">2D платформер</p>
-              <h1 class="game-title">Склад Азот: Собирай заказы!</h1>
-              <p class="subtitle">Собирай заказы быстрее других работников! Избегай тележек, чтобы не потерять очки.</p>
+  <div class="azot-shift-shell">
+    <main class="azot-mainframe" aria-label="Игра Склад Азот: Собирай заказы!">
+      <!-- Диспетчерский экран: здесь сотрудник получает вводные по смене -->
+      <section id="azot-dispatch-scene" class="azot-scene active">
+        <div class="azot-console-panel dispatch-console">
+          <div class="dispatch-briefhead">
+            <div class="shift-pitch">
+              <p class="azot-kicker">2D платформер</p>
+              <h1 class="dispatch-headline">Склад Азот: Собирай заказы!</h1>
+              <p class="dispatch-subnote">Собирай заказы быстрее других работников, следи за тележками и не срывай показатели участка.</p>
             </div>
           </div>
 
-          <div class="instructions">
-            <div class="instructions-head">
+          <!-- Короткий регламент смены для нового комплектовщика -->
+          <div class="shift-reglament">
+            <div class="shift-reglament-head">
               <h2>Как играть</h2>
-              <img class="start-gif" src="assets/instruction.gif" alt="" aria-hidden="true">
+              <img class="loader-mascot" src="assets/instruction.gif" alt="" aria-hidden="true">
             </div>
             <ol>
               <li style="--delay: 0.05s;">A / D или ← / → - движение</li>
@@ -38,80 +40,102 @@
             </ol>
           </div>
 
-          <label class="input-block" for="player-name">
+          <!-- Паспорт смены влияет на поток заказов и попадёт в журнал результатов -->
+          <div class="shift-passport-grid">
+            <label class="passport-slot" for="azot-sector-code">
+              <span>Участок склада</span>
+              <select id="azot-sector-code">
+                <option value="bulk-lane">Паллетный ряд</option>
+                <option value="rush-dock">Экспресс-ворота</option>
+                <option value="fragile-bay">Хрупкий ряд</option>
+              </select>
+            </label>
+            <label class="passport-slot" for="brigade-call-code">
+              <span>Бригада</span>
+              <select id="brigade-call-code">
+                <option value="north-3">Север-3</option>
+                <option value="azot-pack">Азот-комплект</option>
+                <option value="night-belt">Ночная лента</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="picker-pass-form" for="picker-badge-input">
             <span>Имя работника склада</span>
-            <input id="player-name" type="text" maxlength="16" autocomplete="off" placeholder="Введите имя">
+            <input id="picker-badge-input" type="text" maxlength="16" autocomplete="off" placeholder="Введите имя">
           </label>
 
-          <div class="start-actions">
-            <button id="start-btn" class="primary-btn" disabled>Начать игру</button>
-            <div class="inline-settings">
-              <button id="start-font-down" class="icon-btn" type="button" aria-label="Уменьшить шрифт">A-</button>
-              <button id="start-font-up" class="icon-btn" type="button" aria-label="Увеличить шрифт">A+</button>
-              <button id="start-sound-btn" class="icon-btn" type="button" aria-label="Включить или выключить звук">Звук: вкл</button>
+          <div class="dispatch-control-row">
+            <button id="dispatch-shift-btn" class="shift-btn" disabled>Открыть смену</button>
+            <div class="terminal-toggles">
+              <button id="dispatch-font-down" class="console-btn" type="button" aria-label="Уменьшить шрифт">A-</button>
+              <button id="dispatch-font-up" class="console-btn" type="button" aria-label="Увеличить шрифт">A+</button>
+              <button id="dispatch-sound-toggle" class="console-btn" type="button" aria-label="Включить или выключить звук">Звук: вкл</button>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="game-screen" class="screen" aria-hidden="true">
+      <!-- Рабочий экран: стеллажи, заказы и верхний щит смены -->
+      <section id="rack-floor-scene" class="azot-scene" aria-hidden="true">
         <canvas id="game-canvas" width="1024" height="768" aria-label="Игровое поле"></canvas>
 
-        <div class="hud">
-          <div class="hud-group">
-            <div class="hud-card">
-              <span class="hud-label">Игрок</span>
-              <span id="hud-player" class="hud-value">-</span>
+        <div class="main-hud">
+          <div class="hud-cluster">
+            <div class="hud-pill">
+              <span class="hud-caption">Игрок</span>
+              <span id="hud-picker" class="hud-reading">-</span>
             </div>
-            <div class="hud-card">
-              <span class="hud-label">Режим</span>
-              <span id="hud-mode" class="hud-value">Обычный</span>
-            </div>
-          </div>
-
-          <div class="hud-group hud-group-center">
-            <div class="hud-card timer-card">
-              <span class="hud-label">Время</span>
-              <span id="hud-timer" class="hud-value">01:30</span>
-            </div>
-            <div class="hud-card">
-              <span class="hud-label">Очки</span>
-              <span id="hud-score" class="hud-value">0</span>
-            </div>
-            <div class="hud-card">
-              <span class="hud-label">Жизни</span>
-              <span id="hud-lives" class="hud-value">3</span>
+            <div class="hud-pill">
+              <span class="hud-caption">Участок</span>
+              <span id="hud-sector-readout" class="hud-reading">Паллетный ряд</span>
             </div>
           </div>
 
-          <div class="hud-group hud-group-actions">
-            <button id="pause-btn" class="icon-btn" type="button">Пауза</button>
-            <button id="sound-btn" class="icon-btn" type="button">Звук: вкл</button>
-            <button id="finish-btn" class="icon-btn" type="button">Сдать смену</button>
+          <div class="hud-cluster hud-cluster-center">
+            <div class="hud-pill shift-timer-pill">
+              <span class="hud-caption">Время</span>
+              <span id="hud-shift-clock" class="hud-reading">01:30</span>
+            </div>
+            <div class="hud-pill">
+              <span class="hud-caption">Очки</span>
+              <span id="hud-cargo-score" class="hud-reading">0</span>
+            </div>
+            <div class="hud-pill">
+              <span class="hud-caption">Жизни</span>
+              <span id="hud-fall-limit" class="hud-reading">3</span>
+            </div>
+          </div>
+
+          <div class="hud-cluster hud-cluster-actions">
+            <button id="shift-pause-btn" class="console-btn" type="button">Пауза</button>
+            <button id="shift-sound-btn" class="console-btn" type="button">Звук: вкл</button>
+            <button id="handover-shift-btn" class="console-btn" type="button">Сдать смену</button>
           </div>
         </div>
 
-        <div id="pause-overlay" class="overlay hidden" aria-hidden="true">
-          <div class="overlay-card">
+        <div id="forklift-pause-gate" class="shift-overlay hidden" aria-hidden="true">
+          <div class="pause-bay-panel">
             <h2>Пауза</h2>
             <p>Смена временно остановлена.</p>
-            <div class="overlay-actions">
-              <button id="resume-btn" class="primary-btn" type="button">Продолжить</button>
+            <div class="pause-bay-actions">
+              <button id="resume-shift-btn" class="shift-btn" type="button">Продолжить</button>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="end-screen" class="screen" aria-hidden="true">
-        <div class="screen-panel end-panel">
-          <p class="eyebrow">Отчёт работника</p>
+      <!-- Экран сдачи смены: итог, замечания и журнал бригады -->
+      <section id="shift-ledger-scene" class="azot-scene" aria-hidden="true">
+        <div class="azot-console-panel handover-ledger-panel">
+          <p class="azot-kicker">Отчёт работника</p>
           <h2>Смена завершена</h2>
-          <p id="end-summary" class="end-summary">Итог: 0 очков</p>
-          <p id="end-extra" class="end-extra">Результат сохранён в таблицу.</p>
+          <p id="handover-summary" class="end-summary">Итог: 0 очков</p>
+          <p id="handover-note" class="end-extra">Результат сохранён в таблицу.</p>
 
-          <div class="leaderboard-wrap">
+          <div class="brigade-ledger">
             <h3>Таблица результатов</h3>
-            <table class="leaderboard" aria-label="Топ результатов">
+            <table class="brigade-ledger-table" aria-label="Топ результатов">
               <thead>
                 <tr>
                   <th>Место</th>
@@ -119,15 +143,15 @@
                   <th>Очки</th>
                 </tr>
               </thead>
-              <tbody id="leaderboard-body"></tbody>
+              <tbody id="brigade-ledger-body"></tbody>
             </table>
           </div>
 
-          <p id="player-rank" class="rank-note hidden"></p>
+          <p id="picker-ledger-rank" class="picker-ledger-place hidden"></p>
 
-          <div class="end-actions">
-            <button id="restart-btn" class="primary-btn" type="button">Начать снова</button>
-            <button id="back-btn" class="icon-btn" type="button">В меню</button>
+          <div class="handover-control-row">
+            <button id="restart-shift-btn" class="shift-btn" type="button">Начать снова</button>
+            <button id="return-dispatch-btn" class="console-btn" type="button">В меню</button>
           </div>
         </div>
       </section>

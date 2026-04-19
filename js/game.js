@@ -1,4 +1,5 @@
 ﻿(function () {
+  // Базовые размеры сцены и физики.
   const GAME_WIDTH = 1024;
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
@@ -7,17 +8,50 @@
   const GRAVITY = 1500;
   const COYOTE_TIME = 0.08;
   const BOOST_DURATION = 5;
-  const SPRITES = {
+
+  // Все кадры лежат в одном описании, чтобы не искать их по файлу.
+  const AZOT_FRAMES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
     playerWalk2: { sx: 36, sy: 1, sw: 15, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerJump: { sx: 52, sy: 1, sw: 18, sh: 29, rw: 30, rh: 57, ox: -2, oy: -2 },
-    box: { sx: 77, sy: 13, sw: 20, sh: 18 },
-    paper: { sx: 101, sy: 8, sw: 17, sh: 23 },
-    fragile: { sx: 120, sy: 13, sw: 20, sh: 18 },
-    energy: { sx: 147, sy: 12, sw: 12, sh: 19 },
+    stockCrate: { sx: 77, sy: 13, sw: 20, sh: 18 },
+    rushInvoice: { sx: 101, sy: 8, sw: 17, sh: 23 },
+    glassCrate: { sx: 120, sy: 13, sw: 20, sh: 18 },
+    energyCan: { sx: 147, sy: 12, sw: 12, sh: 19 },
     cart1: { sx: 167, sy: 13, sw: 25, sh: 18 },
     cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
+  };
+
+  // Участок меняет состав заказов и темп помех на смене.
+  const SHIFT_SECTOR_RULES = {
+    "bulk-lane": {
+      urgentBonus: -0.05,
+      fragileBonus: -0.04,
+      activeOrdersBonus: 1,
+      initialOrders: 5,
+      urgentTtl: 5.6,
+      forkliftSpeedBonus: -10,
+      energyRespawnBase: 16
+    },
+    "rush-dock": {
+      urgentBonus: 0.17,
+      fragileBonus: -0.06,
+      activeOrdersBonus: 1,
+      initialOrders: 5,
+      urgentTtl: 4.2,
+      forkliftSpeedBonus: 22,
+      energyRespawnBase: 12
+    },
+    "fragile-bay": {
+      urgentBonus: -0.03,
+      fragileBonus: 0.2,
+      activeOrdersBonus: -1,
+      initialOrders: 4,
+      urgentTtl: 5.2,
+      forkliftSpeedBonus: 8,
+      energyRespawnBase: 15
+    }
   };
 
   function clamp(value, min, max) {
@@ -33,34 +67,84 @@
     );
   }
 
-  function StorageRunner(canvas, options) {
+  function createEmptyShiftStats() {
+    return {
+      ordinarySpawned: 0,
+      urgentSpawned: 0,
+      fragileSpawned: 0,
+      ordinaryPicked: 0,
+      urgentPicked: 0,
+      fragilePicked: 0,
+      falls: 0,
+      cartHits: 0,
+      cartCargoLosses: 0,
+      cartOrdinaryLosses: 0,
+      cartUrgentLosses: 0,
+      cartFragileLosses: 0,
+      urgentExpired: 0,
+      fragileBroken: 0,
+      boostsUsed: 0
+    };
+  }
+
+  // Паспорт участка передаём из диспетчерской формы в саму смену.
+  function normalizeShiftPassport(passport) {
+    const source = passport && typeof passport === 'object' ? passport : {};
+    const sectorCode = SHIFT_SECTOR_RULES[source.sectorCode] ? source.sectorCode : 'bulk-lane';
+
+    return {
+      sectorCode: sectorCode,
+      sectorLabel: source.sectorLabel || (
+        sectorCode === 'rush-dock' ? 'Экспресс-ворота' :
+        sectorCode === 'fragile-bay' ? 'Хрупкий ряд' :
+        'Паллетный ряд'
+      ),
+      sectorShortLabel: source.sectorShortLabel || (
+        sectorCode === 'rush-dock' ? 'Экспресс' :
+        sectorCode === 'fragile-bay' ? 'Хрупкий' :
+        'Паллеты'
+      ),
+      brigadeCode: typeof source.brigadeCode === 'string' ? source.brigadeCode : 'north-3',
+      brigadeLabel: source.brigadeLabel || 'Север-3'
+    };
+  }
+
+  function AzotShiftRunner(canvas, options) {
+    options = options || {};
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.options = options;
-    this.audio = options.audio;
+    this.shiftPassport = normalizeShiftPassport(options.shiftPassport);
+    this.sectorRules = SHIFT_SECTOR_RULES[this.shiftPassport.sectorCode];
+    this.audio = options.audio || {
+      startAmbient: function () {},
+      stopAmbient: function () {},
+      play: function () {}
+    };
     this.sprites = new Image();
     this.sprites.src = 'assets/sprites.png';
     this.bgTile = new Image();
     this.bgTile.src = 'assets/bg-tile.png';
 
+    // Здесь живёт всё состояние одной смены.
     this.lastTimestamp = 0;
-    this.bgOffset = 0;
+    this.warehouseDrift = 0;
     this.running = false;
     this.finished = false;
     this.paused = false;
-    this.playerName = 'Игрок';
+    this.pickerAlias = 'Игрок';
     this.testMode = false;
     this.score = 0;
     this.timeLeft = 90;
     this.maxLives = 3;
     this.lives = 3;
     this.runTime = 0;
-    this.orderSpawnTimer = 0;
-    this.cartSpawnTimer = 0;
-    this.bonusSpawnTimer = 0;
-    this.cartCounter = 0;
+    this.orderDropTimer = 0;
+    this.forkliftSpawnTimer = 0;
+    this.energySpawnTimer = 0;
+    this.forkliftSerial = 0;
 
-    this.input = {
+    this.playerControls = {
       left: false,
       right: false,
       down: false,
@@ -68,63 +152,82 @@
     };
 
     this.flashTimer = 0;
-    this.statusText = '';
-    this.statusTimer = 0;
-    this.floaters = [];
+    this.radioMessage = '';
+    this.radioMessageTimer = 0;
+    this.dockPopups = [];
+    this.shiftStats = createEmptyShiftStats();
 
     this.player = null;
-    this.platforms = [];
-    this.cartLanes = [];
-    this.carts = [];
-    this.collectibles = [];
-    this.bonuses = [];
+    this.rackPlatforms = [];
+    this.forkliftLanes = [];
+    this.forkliftPatrols = [];
+    this.warehouseOrders = [];
+    this.energyPickups = [];
 
     this.boundLoop = this.loop.bind(this);
     this.handleKeyDown = this.onKeyDown.bind(this);
     this.handleKeyUp = this.onKeyUp.bind(this);
   }
 
-  StorageRunner.prototype.start = function (playerName, testMode) {
-    this.playerName = playerName;
+  AzotShiftRunner.prototype.start = function (pickerName, testMode) {
+    // Если браузер не дал canvas, корректно выходим сразу.
+    if (!this.ctx) {
+      if (typeof this.options.onFinish === 'function') {
+        this.options.onFinish({
+          pickerName: pickerName || 'Игрок',
+          score: 0,
+          testMode: !!testMode,
+          lives: 0,
+          reason: 'canvas-error',
+          shiftPassport: this.shiftPassport,
+          stats: createEmptyShiftStats()
+        });
+      }
+      return;
+    }
+
+    this.pickerAlias = pickerName;
     this.testMode = !!testMode;
     this.running = true;
     this.finished = false;
     this.paused = false;
     this.lastTimestamp = 0;
-    this.bgOffset = 0;
+    this.warehouseDrift = 0;
     this.score = 0;
     this.timeLeft = 90;
     this.maxLives = 3;
     this.lives = this.maxLives;
     this.runTime = 0;
-    this.orderSpawnTimer = 0.5;
-    this.cartSpawnTimer = 1.2;
-    this.bonusSpawnTimer = 8;
-    this.cartCounter = 0;
+    this.orderDropTimer = 0.5;
+    this.forkliftSpawnTimer = 1.2;
+    this.energySpawnTimer = this.sectorRules.energyRespawnBase - 4;
+    this.forkliftSerial = 0;
     this.flashTimer = 0;
-    this.statusText = this.testMode ? 'TEST MODE' : 'Смена началась';
-    this.statusTimer = 1.4;
-    this.floaters = [];
+    this.radioMessage = this.testMode ? 'TEST MODE' : 'Смена началась: ' + this.shiftPassport.sectorLabel;
+    this.radioMessageTimer = 1.4;
+    this.dockPopups = [];
+    this.shiftStats = createEmptyShiftStats();
 
-    this.setupLevel();
+    this.buildWarehouseFloor();
 
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
 
     this.audio.startAmbient();
-    this.updateHud();
+    this.broadcastShiftBoard();
     window.requestAnimationFrame(this.boundLoop);
   };
 
-  StorageRunner.prototype.stop = function () {
+  AzotShiftRunner.prototype.stop = function () {
     this.running = false;
     this.audio.stopAmbient();
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
   };
 
-  StorageRunner.prototype.setupLevel = function () {
-    this.platforms = [
+  AzotShiftRunner.prototype.buildWarehouseFloor = function () {
+    // Расклад полок и стартовая точка игрока.
+    this.rackPlatforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
       { x: 40,  y: 600, w: 180, h: 18, solid: true },
       { x: 260, y: 600, w: 504, h: 18, solid: true },
@@ -174,38 +277,38 @@
       facing: 1
     };
 
-    this.cartLanes = [];
-    for (let i = 1; i < this.platforms.length; i += 1) {
-      const platform = this.platforms[i];
+    this.forkliftLanes = [];
+    for (let i = 1; i < this.rackPlatforms.length; i += 1) {
+      const platform = this.rackPlatforms[i];
       if (platform.w >= 180) {
-        this.cartLanes.push({
+        this.forkliftLanes.push({
           platformIndex: i,
           y: platform.y - 40
         });
       }
     }
 
-    this.carts = [];
-    this.collectibles = [];
-    this.bonuses = [];
+    this.forkliftPatrols = [];
+    this.warehouseOrders = [];
+    this.energyPickups = [];
 
-    for (let i = 0; i < 4; i += 1) {
-      this.spawnOrderFromTop();
+    for (let i = 0; i < this.sectorRules.initialOrders; i += 1) {
+      this.spawnFallingOrder();
     }
   };
 
-  StorageRunner.prototype.getDifficulty = function () {
+  AzotShiftRunner.prototype.getDifficulty = function () {
     return clamp(this.runTime / 55, 0, 1);
   };
 
-  StorageRunner.prototype.getTargetActiveOrders = function () {
-    return 5 + Math.floor(this.getDifficulty() * 5);
+  AzotShiftRunner.prototype.getTargetActiveOrders = function () {
+    return 5 + this.sectorRules.activeOrdersBonus + Math.floor(this.getDifficulty() * 5);
   };
 
-  StorageRunner.prototype.chooseOrderType = function () {
+  AzotShiftRunner.prototype.chooseOrderType = function () {
     const difficulty = this.getDifficulty();
-    const fragileChance = 0.12 + difficulty * 0.28;
-    const urgentChance = 0.22 + difficulty * 0.28;
+    const fragileChance = clamp(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
+    const urgentChance = clamp(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
     const roll = Math.random();
 
     if (roll < fragileChance) {
@@ -217,11 +320,11 @@
     return 'ordinary';
   };
 
-  StorageRunner.prototype.getPlatformsUnderX = function (x, width) {
+  AzotShiftRunner.prototype.getRacksUnderX = function (x, width) {
     const result = [];
 
-    for (let i = 1; i < this.platforms.length; i += 1) {
-      const platform = this.platforms[i];
+    for (let i = 1; i < this.rackPlatforms.length; i += 1) {
+      const platform = this.rackPlatforms[i];
       const horizontalOverlap = x + width > platform.x && x < platform.x + platform.w;
       if (horizontalOverlap) {
         result.push(i);
@@ -229,14 +332,14 @@
     }
 
     result.sort(function (a, b) {
-      return this.platforms[a].y - this.platforms[b].y;
+      return this.rackPlatforms[a].y - this.rackPlatforms[b].y;
     }.bind(this));
 
     return result.length ? result : [1];
   };
 
-  StorageRunner.prototype.createOrder = function (type, targetPlatformIndex) {
-    const platform = this.platforms[targetPlatformIndex];
+  AzotShiftRunner.prototype.createWarehouseOrder = function (type, targetPlatformIndex) {
+    const platform = this.rackPlatforms[targetPlatformIndex];
     const sizeMap = {
       ordinary: { w: 30, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
       urgent: { w: 24, h: 33, value: 20, gravityScale: 1, maxFallSpeed: 980 },
@@ -244,7 +347,7 @@
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
-    const supportedPlatforms = this.getPlatformsUnderX(x, data.w);
+    const supportedPlatforms = this.getRacksUnderX(x, data.w);
     const targetStopPlatformIndex = type === 'fragile'
       ? null
       : supportedPlatforms[Math.floor(Math.random() * supportedPlatforms.length)];
@@ -263,7 +366,7 @@
       vy: 0,
       platformIndex: null,
       targetStopPlatformIndex: targetStopPlatformIndex,
-      ttl: type === 'urgent' ? 5 : 0,
+      ttl: type === 'urgent' ? this.sectorRules.urgentTtl : 0,
       bobPhase: Math.random() * Math.PI * 2,
       pulse: Math.random() * Math.PI * 2,
       gravityScale: data.gravityScale,
@@ -272,18 +375,25 @@
     };
   };
 
-  StorageRunner.prototype.spawnOrderFromTop = function () {
-    const availablePlatforms = this.platforms.slice(1);
+  AzotShiftRunner.prototype.spawnFallingOrder = function () {
+    const availablePlatforms = this.rackPlatforms.slice(1);
     const targetPlatform = availablePlatforms[Math.floor(Math.random() * availablePlatforms.length)];
-    const targetPlatformIndex = this.platforms.indexOf(targetPlatform);
+    const targetPlatformIndex = this.rackPlatforms.indexOf(targetPlatform);
     const type = this.chooseOrderType();
-    this.collectibles.push(this.createOrder(type, targetPlatformIndex));
+    if (type === 'fragile') {
+      this.shiftStats.fragileSpawned += 1;
+    } else if (type === 'urgent') {
+      this.shiftStats.urgentSpawned += 1;
+    } else {
+      this.shiftStats.ordinarySpawned += 1;
+    }
+    this.warehouseOrders.push(this.createWarehouseOrder(type, targetPlatformIndex));
   };
 
-  StorageRunner.prototype.spawnEnergyBonus = function () {
-    const platformIndex = 1 + Math.floor(Math.random() * (this.platforms.length - 1));
-    const platform = this.platforms[platformIndex];
-    this.bonuses.push({
+  AzotShiftRunner.prototype.spawnEnergyPickup = function () {
+    const platformIndex = 1 + Math.floor(Math.random() * (this.rackPlatforms.length - 1));
+    const platform = this.rackPlatforms[platformIndex];
+    this.energyPickups.push({
       type: 'energy',
       x: platform.x + 24 + Math.random() * Math.max(24, platform.w - 56),
       y: platform.y - 32,
@@ -295,25 +405,26 @@
     });
   };
 
-  StorageRunner.prototype.applyEnergyBoost = function () {
+  AzotShiftRunner.prototype.applyEnergyRush = function () {
+    this.shiftStats.boostsUsed += 1;
     this.player.boostTimer = BOOST_DURATION;
     this.player.speed = this.player.baseSpeed + 85;
     this.player.maxAirJumps = 1;
     this.player.airJumpsLeft = Math.max(this.player.airJumpsLeft, 1);
-    this.statusText = 'Энергетик: ускорение и двойной прыжок';
-    this.statusTimer = 1.1;
-    this.pushFloater(this.player.x, this.player.y - 10, 'BOOST');
+    this.radioMessage = 'Энергетик: ускорение и двойной прыжок';
+    this.radioMessageTimer = 1.1;
+    this.pushDockPopup(this.player.x, this.player.y - 10, 'BOOST');
     this.audio.play('pickupRare');
   };
 
-  StorageRunner.prototype.spawnCart = function () {
+  AzotShiftRunner.prototype.spawnForklift = function () {
     const difficulty = this.getDifficulty();
-    const lane = this.cartLanes[Math.floor(Math.random() * this.cartLanes.length)];
+    const lane = this.forkliftLanes[Math.floor(Math.random() * this.forkliftLanes.length)];
     const fromLeft = Math.random() < 0.5;
-    const baseSpeed = 190 + difficulty * 120;
+    const baseSpeed = 190 + difficulty * 120 + this.sectorRules.forkliftSpeedBonus;
 
-    this.carts.push({
-      id: this.cartCounter,
+    this.forkliftPatrols.push({
+      id: this.forkliftSerial,
       x: fromLeft ? -72 : GAME_WIDTH + 72,
       y: lane.y,
       w: 54,
@@ -324,16 +435,16 @@
       anim: 0
     });
 
-    this.cartCounter += 1;
+    this.forkliftSerial += 1;
   };
 
-  StorageRunner.prototype.beginDropThrough = function () {
+  AzotShiftRunner.prototype.dropThroughRack = function () {
     const player = this.player;
     if (!player.onGround || player.supportPlatformIndex <= 0) {
       return;
     }
 
-    const platform = this.platforms[player.supportPlatformIndex];
+    const platform = this.rackPlatforms[player.supportPlatformIndex];
     player.dropThroughPlatformIndex = player.supportPlatformIndex;
     player.dropResumeY = platform.y + platform.h + 8;
     player.supportPlatformIndex = -1;
@@ -342,7 +453,7 @@
     player.vy = Math.max(player.vy, 90);
   };
 
-  StorageRunner.prototype.respawnPlayerAfterFall = function () {
+  AzotShiftRunner.prototype.resetPlayerAfterFall = function () {
     const player = this.player;
     player.x = 90;
     player.y = 450;
@@ -357,14 +468,16 @@
     player.coyoteTimer = 0;
   };
 
-  StorageRunner.prototype.handlePlayerFall = function () {
+  AzotShiftRunner.prototype.handlePlayerFall = function () {
+    this.shiftStats.falls += 1;
+
     if (this.testMode) {
-      this.respawnPlayerAfterFall();
+      this.resetPlayerAfterFall();
       this.audio.play('hit');
       this.flashTimer = 0.2;
-      this.pushFloater(this.player.x, this.player.y - 8, 'TEST');
-      this.statusText = 'Тестовый сброс после падения';
-      this.statusTimer = 0.9;
+      this.pushDockPopup(this.player.x, this.player.y - 8, 'TEST');
+      this.radioMessage = 'Тестовый сброс после падения';
+      this.radioMessageTimer = 0.9;
       return;
     }
 
@@ -374,33 +487,33 @@
     this.flashTimer = 0.2;
 
     if (this.lives <= 0) {
-      this.statusText = 'Вы снова упали - игра окончена';
-      this.statusTimer = 1.2;
+      this.radioMessage = 'Вы снова упали - игра окончена';
+      this.radioMessageTimer = 1.2;
       this.finishRun('fall');
       return;
     }
 
-    this.respawnPlayerAfterFall();
-    this.pushFloater(this.player.x, this.player.y - 8, '-10');
-    this.statusText = 'Падение: -10 очков, осталось жизней ' + this.lives;
-    this.statusTimer = 1.1;
+    this.resetPlayerAfterFall();
+    this.pushDockPopup(this.player.x, this.player.y - 8, '-10');
+    this.radioMessage = 'Падение: -10 очков, осталось жизней ' + this.lives;
+    this.radioMessageTimer = 1.1;
   };
 
-  StorageRunner.prototype.onKeyDown = function (event) {
+  AzotShiftRunner.prototype.onKeyDown = function (event) {
     if (!this.running || this.finished) {
       return;
     }
 
     if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
-      this.input.left = true;
+      this.playerControls.left = true;
     } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
-      this.input.right = true;
+      this.playerControls.right = true;
     } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
-      this.input.down = true;
-      this.beginDropThrough();
+      this.playerControls.down = true;
+      this.dropThroughRack();
     } else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
       if (!event.repeat) {
-        this.input.jumpQueued = true;
+        this.playerControls.jumpQueued = true;
       }
     } else if ((event.code === 'Space' || event.code === 'KeyP') && !event.repeat) {
       event.preventDefault();
@@ -408,17 +521,17 @@
     }
   };
 
-  StorageRunner.prototype.onKeyUp = function (event) {
+  AzotShiftRunner.prototype.onKeyUp = function (event) {
     if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
-      this.input.left = false;
+      this.playerControls.left = false;
     } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
-      this.input.right = false;
+      this.playerControls.right = false;
     } else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
-      this.input.down = false;
+      this.playerControls.down = false;
     }
   };
 
-  StorageRunner.prototype.togglePause = function () {
+  AzotShiftRunner.prototype.togglePause = function () {
     if (!this.running || this.finished) {
       return;
     }
@@ -428,7 +541,7 @@
     }
   };
 
-  StorageRunner.prototype.finishRun = function (reason) {
+  AzotShiftRunner.prototype.finishRun = function (reason) {
     if (this.finished) {
       return;
     }
@@ -440,17 +553,41 @@
     window.removeEventListener('keyup', this.handleKeyUp);
 
     if (typeof this.options.onFinish === 'function') {
-      this.options.onFinish({
-        playerName: this.playerName,
-        score: this.score,
-        testMode: this.testMode,
-        lives: this.lives,
-        reason: reason || 'complete'
-      });
+      this.options.onFinish(this.buildShiftSummary(reason));
     }
   };
 
-  StorageRunner.prototype.loop = function (timestamp) {
+  AzotShiftRunner.prototype.buildShiftSummary = function (reason) {
+    const stats = this.shiftStats || createEmptyShiftStats();
+
+    return {
+      pickerName: this.pickerAlias,
+      score: this.score,
+      testMode: this.testMode,
+      lives: this.lives,
+      reason: reason || 'complete',
+      shiftPassport: this.shiftPassport,
+      stats: {
+        ordinarySpawned: stats.ordinarySpawned,
+        urgentSpawned: stats.urgentSpawned,
+        fragileSpawned: stats.fragileSpawned,
+        ordinaryPicked: stats.ordinaryPicked,
+        urgentPicked: stats.urgentPicked,
+        fragilePicked: stats.fragilePicked,
+        falls: stats.falls,
+        cartHits: stats.cartHits,
+        cartCargoLosses: stats.cartCargoLosses,
+        cartOrdinaryLosses: stats.cartOrdinaryLosses,
+        cartUrgentLosses: stats.cartUrgentLosses,
+        cartFragileLosses: stats.cartFragileLosses,
+        urgentExpired: stats.urgentExpired,
+        fragileBroken: stats.fragileBroken,
+        boostsUsed: stats.boostsUsed
+      }
+    };
+  };
+
+  AzotShiftRunner.prototype.loop = function (timestamp) {
     if (!this.running) {
       this.render();
       return;
@@ -466,27 +603,28 @@
 
     this.update(dt);
     this.render();
-    this.updateHud();
+    this.broadcastShiftBoard();
 
     if (this.running) {
       window.requestAnimationFrame(this.boundLoop);
     }
   };
 
-  StorageRunner.prototype.update = function (dt) {
-    this.bgOffset += dt * (this.paused ? 18 : 48);
+  AzotShiftRunner.prototype.update = function (dt) {
+    // В паузе живут только служебные таймеры и визуальные мелочи.
+    this.warehouseDrift += dt * (this.paused ? 18 : 48);
 
-    if (this.statusTimer > 0) {
-      this.statusTimer -= dt;
-      if (this.statusTimer <= 0) {
-        this.statusText = '';
+    if (this.radioMessageTimer > 0) {
+      this.radioMessageTimer -= dt;
+      if (this.radioMessageTimer <= 0) {
+        this.radioMessage = '';
       }
     }
 
-    this.floaters = this.floaters.filter(function (floater) {
-      floater.life -= dt;
-      floater.y -= dt * 34;
-      return floater.life > 0;
+    this.dockPopups = this.dockPopups.filter(function (popup) {
+      popup.life -= dt;
+      popup.y -= dt * 34;
+      return popup.life > 0;
     });
 
     if (this.flashTimer > 0) {
@@ -506,8 +644,8 @@
         this.player.speed = this.player.baseSpeed;
         this.player.maxAirJumps = this.player.baseMaxAirJumps;
         this.player.airJumpsLeft = Math.min(this.player.airJumpsLeft, this.player.maxAirJumps);
-        this.statusText = 'Энергетик закончился';
-        this.statusTimer = 0.8;
+        this.radioMessage = 'Энергетик закончился';
+        this.radioMessageTimer = 0.8;
       }
     }
 
@@ -520,47 +658,47 @@
       }
     }
 
-    this.orderSpawnTimer -= dt;
-    if (this.orderSpawnTimer <= 0 && this.collectibles.length < this.getTargetActiveOrders()) {
-      this.spawnOrderFromTop();
-      this.orderSpawnTimer = 0.95 - this.getDifficulty() * 0.45 + Math.random() * 0.25;
+    this.orderDropTimer -= dt;
+    if (this.orderDropTimer <= 0 && this.warehouseOrders.length < this.getTargetActiveOrders()) {
+      this.spawnFallingOrder();
+      this.orderDropTimer = 0.95 - this.getDifficulty() * 0.45 + Math.random() * 0.25;
     }
 
-    this.cartSpawnTimer -= dt;
-    if (this.cartSpawnTimer <= 0 && this.carts.length < 3 + Math.floor(this.getDifficulty() * 5)) {
-      this.spawnCart();
-      this.cartSpawnTimer = 2.4 - this.getDifficulty() * 1.45 + Math.random() * 0.35;
+    this.forkliftSpawnTimer -= dt;
+    if (this.forkliftSpawnTimer <= 0 && this.forkliftPatrols.length < 3 + Math.floor(this.getDifficulty() * 5)) {
+      this.spawnForklift();
+      this.forkliftSpawnTimer = 2.4 - this.getDifficulty() * 1.45 + Math.random() * 0.35;
     }
 
-    this.bonusSpawnTimer -= dt;
-    if (this.bonusSpawnTimer <= 0 && this.bonuses.length < 1) {
-      this.spawnEnergyBonus();
-      this.bonusSpawnTimer = 14 + Math.random() * 6;
+    this.energySpawnTimer -= dt;
+    if (this.energySpawnTimer <= 0 && this.energyPickups.length < 1) {
+      this.spawnEnergyPickup();
+      this.energySpawnTimer = this.sectorRules.energyRespawnBase + Math.random() * 4;
     }
 
     this.updatePlayer(dt);
     if (!this.running) {
       return;
     }
-    this.updateOrders(dt);
-    this.updateBonuses(dt);
-    this.updateCarts(dt);
+    this.updateWarehouseOrders(dt);
+    this.updateEnergyPickups(dt);
+    this.updateForkliftPatrols(dt);
   };
 
-  StorageRunner.prototype.updatePlayer = function (dt) {
+  AzotShiftRunner.prototype.updatePlayer = function (dt) {
     const player = this.player;
 
     player.vx = 0;
-    if (this.input.left) {
+    if (this.playerControls.left) {
       player.vx = -player.speed;
       player.facing = -1;
     }
-    if (this.input.right) {
+    if (this.playerControls.right) {
       player.vx = player.speed;
       player.facing = 1;
     }
 
-    if (this.input.jumpQueued) {
+    if (this.playerControls.jumpQueued) {
       if (player.onGround || player.coyoteTimer > 0) {
         player.vy = -player.jumpForce;
         player.onGround = false;
@@ -571,10 +709,10 @@
         player.vy = -player.jumpForce;
         player.airJumpsLeft -= 1;
         this.audio.play('jump');
-        this.pushFloater(player.x, player.y - 6, 'x2');
+        this.pushDockPopup(player.x, player.y - 6, 'x2');
       }
     }
-    this.input.jumpQueued = false;
+    this.playerControls.jumpQueued = false;
 
     player.vy += GRAVITY * dt;
     player.invulnerability = Math.max(0, player.invulnerability - dt);
@@ -597,12 +735,12 @@
     player.onGround = false;
     player.supportPlatformIndex = -1;
 
-    for (let i = 1; i < this.platforms.length; i += 1) {
+    for (let i = 1; i < this.rackPlatforms.length; i += 1) {
       if (i === player.dropThroughPlatformIndex) {
         continue;
       }
 
-      const platform = this.platforms[i];
+      const platform = this.rackPlatforms[i];
       const wasAbove = previousY + player.h <= platform.y;
       const nowIntersect = rectsIntersect(player, platform);
       if (wasAbove && nowIntersect && player.vy >= 0) {
@@ -620,8 +758,8 @@
       player.coyoteTimer = COYOTE_TIME;
     }
 
-    if (player.onGround && this.input.down && player.supportPlatformIndex > 0) {
-      this.beginDropThrough();
+    if (player.onGround && this.playerControls.down && player.supportPlatformIndex > 0) {
+      this.dropThroughRack();
     }
 
     if (player.y > GAME_HEIGHT + 24) {
@@ -641,12 +779,12 @@
     }
   };
 
-  StorageRunner.prototype.getLandingPlatformIndex = function (item, previousY) {
+  AzotShiftRunner.prototype.getLandingRackIndex = function (item, previousY) {
     let landedPlatformIndex = -1;
     let landedPlatformY = Infinity;
 
-    for (let i = 1; i < this.platforms.length; i += 1) {
-      const platform = this.platforms[i];
+    for (let i = 1; i < this.rackPlatforms.length; i += 1) {
+      const platform = this.rackPlatforms[i];
       const horizontalOverlap = item.x + item.w > platform.x && item.x < platform.x + platform.w;
       const wasAbove = previousY + item.h <= platform.y;
       const nowBelowTop = item.y + item.h >= platform.y;
@@ -660,170 +798,189 @@
     return landedPlatformIndex;
   };
 
-  StorageRunner.prototype.collectItem = function (index) {
-    const item = this.collectibles[index];
-    if (!item) {
+  AzotShiftRunner.prototype.collectOrderCargo = function (index) {
+    const cargo = this.warehouseOrders[index];
+    if (!cargo) {
       return;
     }
 
-    this.score += item.value;
-    this.audio.play(item.type === 'ordinary' ? 'pickup' : 'pickupRare');
-    this.pushFloater(item.x, item.y, '+' + item.value);
-
-    if (item.type === 'fragile') {
-      this.statusText = 'Хрупкий заказ пойман до падения';
-    } else if (item.type === 'urgent') {
-      this.statusText = 'Срочный заказ обработан';
+    this.score += cargo.value;
+    if (cargo.type === 'fragile') {
+      this.shiftStats.fragilePicked += 1;
+    } else if (cargo.type === 'urgent') {
+      this.shiftStats.urgentPicked += 1;
     } else {
-      this.statusText = 'Заказ принят';
+      this.shiftStats.ordinaryPicked += 1;
     }
-    this.statusTimer = 0.75;
+    this.audio.play(cargo.type === 'ordinary' ? 'pickup' : 'pickupRare');
+    this.pushDockPopup(cargo.x, cargo.y, '+' + cargo.value);
 
-    this.collectibles.splice(index, 1);
+    if (cargo.type === 'fragile') {
+      this.radioMessage = 'Хрупкий заказ пойман до падения';
+    } else if (cargo.type === 'urgent') {
+      this.radioMessage = 'Срочный заказ обработан';
+    } else {
+      this.radioMessage = 'Заказ принят';
+    }
+    this.radioMessageTimer = 0.75;
+
+    this.warehouseOrders.splice(index, 1);
   };
 
-  StorageRunner.prototype.breakFragileOrder = function (index, item, platformIndex) {
-    const platform = this.platforms[platformIndex];
-    this.collectibles.splice(index, 1);
-    this.pushFloater(item.x, platform.y - 12, 'x');
-    this.statusText = 'Хрупкий заказ разбился';
-    this.statusTimer = 0.8;
+  AzotShiftRunner.prototype.breakFragileCargo = function (index, item, platformIndex) {
+    const platform = this.rackPlatforms[platformIndex];
+    this.warehouseOrders.splice(index, 1);
+    this.shiftStats.fragileBroken += 1;
+    this.pushDockPopup(item.x, platform.y - 12, 'x');
+    this.radioMessage = 'Хрупкий заказ разбился';
+    this.radioMessageTimer = 0.8;
     this.flashTimer = 0.1;
   };
 
-  StorageRunner.prototype.expireUrgentOrder = function (index, item) {
-    this.collectibles.splice(index, 1);
-    this.pushFloater(item.x, item.y, '!');
-    this.statusText = 'Срочный заказ просрочен';
-    this.statusTimer = 0.8;
+  AzotShiftRunner.prototype.expireUrgentCargo = function (index, item) {
+    this.warehouseOrders.splice(index, 1);
+    this.shiftStats.urgentExpired += 1;
+    this.pushDockPopup(item.x, item.y, '!');
+    this.radioMessage = 'Срочный заказ просрочен';
+    this.radioMessageTimer = 0.8;
   };
 
-  StorageRunner.prototype.updateOrders = function (dt) {
-    for (let i = this.collectibles.length - 1; i >= 0; i -= 1) {
-      const item = this.collectibles[i];
-      item.pulse += dt * 4.5;
-      item.bobPhase += dt * 3;
+  AzotShiftRunner.prototype.updateWarehouseOrders = function (dt) {
+    // Заказы проходят через падение, подбор и штрафные сценарии.
+    for (let i = this.warehouseOrders.length - 1; i >= 0; i -= 1) {
+      const cargo = this.warehouseOrders[i];
+      cargo.pulse += dt * 4.5;
+      cargo.bobPhase += dt * 3;
 
-      if (rectsIntersect(this.player, item)) {
-        this.collectItem(i);
+      if (rectsIntersect(this.player, cargo)) {
+        this.collectOrderCargo(i);
         continue;
       }
 
-      if (item.state === 'falling') {
-        const previousY = item.y;
-        item.vy += (GRAVITY - 60) * item.gravityScale * dt;
-        item.vy = Math.min(item.vy, item.maxFallSpeed);
-        item.y += item.vy * dt;
+      if (cargo.state === 'falling') {
+        const previousY = cargo.y;
+        cargo.vy += (GRAVITY - 60) * cargo.gravityScale * dt;
+        cargo.vy = Math.min(cargo.vy, cargo.maxFallSpeed);
+        cargo.y += cargo.vy * dt;
 
-        const platformIndex = this.getLandingPlatformIndex(item, previousY);
+        const platformIndex = this.getLandingRackIndex(cargo, previousY);
         if (platformIndex >= 0) {
-          const platform = this.platforms[platformIndex];
-          item.y = platform.y - item.h;
-          item.vy = 0;
-          item.platformIndex = platformIndex;
+          const platform = this.rackPlatforms[platformIndex];
+          cargo.y = platform.y - cargo.h;
+          cargo.vy = 0;
+          cargo.platformIndex = platformIndex;
 
-          if (item.type === 'fragile') {
-            if (platformIndex === item.fragileBreakPlatformIndex) {
-              this.breakFragileOrder(i, item, platformIndex);
+          if (cargo.type === 'fragile') {
+            if (platformIndex === cargo.fragileBreakPlatformIndex) {
+              this.breakFragileCargo(i, cargo, platformIndex);
               continue;
             }
 
-            item.y = platform.y - item.h + 2;
-            item.vy = 4;
-            item.platformIndex = null;
-          } else if (platformIndex === item.targetStopPlatformIndex) {
-            item.state = 'grounded';
+            cargo.y = platform.y - cargo.h + 2;
+            cargo.vy = 4;
+            cargo.platformIndex = null;
+          } else if (platformIndex === cargo.targetStopPlatformIndex) {
+            cargo.state = 'grounded';
           } else {
-            item.y = platform.y - item.h + 2;
-            item.vy = 10;
-            item.platformIndex = null;
+            cargo.y = platform.y - cargo.h + 2;
+            cargo.vy = 10;
+            cargo.platformIndex = null;
           }
         }
 
-        if (item.y > GAME_HEIGHT + 60) {
-          this.collectibles.splice(i, 1);
+        if (cargo.y > GAME_HEIGHT + 60) {
+          this.warehouseOrders.splice(i, 1);
         }
-      } else if (item.type === 'urgent') {
-        item.ttl -= dt;
-        if (item.ttl <= 0) {
-          this.expireUrgentOrder(i, item);
+      } else if (cargo.type === 'urgent') {
+        cargo.ttl -= dt;
+        if (cargo.ttl <= 0) {
+          this.expireUrgentCargo(i, cargo);
           continue;
         }
       }
     }
   };
 
-  StorageRunner.prototype.updateBonuses = function (dt) {
-    for (let i = this.bonuses.length - 1; i >= 0; i -= 1) {
-      const bonus = this.bonuses[i];
-      bonus.ttl -= dt;
-      bonus.bobPhase += dt * 4;
+  AzotShiftRunner.prototype.updateEnergyPickups = function (dt) {
+    for (let i = this.energyPickups.length - 1; i >= 0; i -= 1) {
+      const energyCan = this.energyPickups[i];
+      energyCan.ttl -= dt;
+      energyCan.bobPhase += dt * 4;
 
-      if (bonus.ttl <= 0) {
-        this.bonuses.splice(i, 1);
+      if (energyCan.ttl <= 0) {
+        this.energyPickups.splice(i, 1);
         continue;
       }
 
-      if (rectsIntersect(this.player, bonus)) {
-        this.applyEnergyBoost();
-        this.bonuses.splice(i, 1);
+      if (rectsIntersect(this.player, energyCan)) {
+        this.applyEnergyRush();
+        this.energyPickups.splice(i, 1);
         continue;
       }
 
-      for (let cartIndex = 0; cartIndex < this.carts.length; cartIndex += 1) {
-        const cart = this.carts[cartIndex];
-        if (cart.platformIndex === bonus.platformIndex && rectsIntersect(cart, bonus)) {
-          this.bonuses.splice(i, 1);
+      for (let patrolIndex = 0; patrolIndex < this.forkliftPatrols.length; patrolIndex += 1) {
+        const cart = this.forkliftPatrols[patrolIndex];
+        if (cart.platformIndex === energyCan.platformIndex && rectsIntersect(cart, energyCan)) {
+          this.energyPickups.splice(i, 1);
           break;
         }
       }
     }
   };
 
-  StorageRunner.prototype.updateCarts = function (dt) {
-    for (let i = this.carts.length - 1; i >= 0; i -= 1) {
-      const cart = this.carts[i];
+  AzotShiftRunner.prototype.updateForkliftPatrols = function (dt) {
+    for (let i = this.forkliftPatrols.length - 1; i >= 0; i -= 1) {
+      const cart = this.forkliftPatrols[i];
       cart.x += cart.speed * cart.dir * dt;
       cart.anim += dt * 8;
 
       if (this.player.invulnerability <= 0 && rectsIntersect(this.player, cart)) {
         this.score = Math.max(0, this.score - 15);
+        this.shiftStats.cartHits += 1;
         this.player.invulnerability = 1.1;
         this.player.vx = cart.dir * 220;
         this.player.vy = -200;
         this.flashTimer = 0.18;
-        this.statusText = 'Тележка сбила заказ';
-        this.statusTimer = 0.9;
+        this.radioMessage = 'Тележка сбила заказ';
+        this.radioMessageTimer = 0.9;
         this.audio.play('hit');
-        this.pushFloater(this.player.x, this.player.y - 8, '-15');
+        this.pushDockPopup(this.player.x, this.player.y - 8, '-15');
       }
 
-      for (let itemIndex = this.collectibles.length - 1; itemIndex >= 0; itemIndex -= 1) {
-        const item = this.collectibles[itemIndex];
-        if (rectsIntersect(cart, item)) {
-          const penalty = item.type === 'fragile' ? 15 : item.type === 'urgent' ? 8 : 5;
-          this.collectibles.splice(itemIndex, 1);
+      for (let cargoIndex = this.warehouseOrders.length - 1; cargoIndex >= 0; cargoIndex -= 1) {
+        const cargo = this.warehouseOrders[cargoIndex];
+        if (rectsIntersect(cart, cargo)) {
+          const penalty = cargo.type === 'fragile' ? 15 : cargo.type === 'urgent' ? 8 : 5;
+          this.warehouseOrders.splice(cargoIndex, 1);
           this.score = Math.max(0, this.score - penalty);
-          if (item.type === 'fragile') {
-            this.statusText = 'Тележка разбила хрупкий заказ';
-          } else if (item.type === 'urgent') {
-            this.statusText = 'Тележка увезла срочный заказ';
+          this.shiftStats.cartCargoLosses += 1;
+          if (cargo.type === 'fragile') {
+            this.shiftStats.cartFragileLosses += 1;
+          } else if (cargo.type === 'urgent') {
+            this.shiftStats.cartUrgentLosses += 1;
           } else {
-            this.statusText = 'Тележка увезла заказ';
+            this.shiftStats.cartOrdinaryLosses += 1;
           }
-          this.statusTimer = 0.85;
-          this.pushFloater(item.x, item.y, '-' + penalty);
+          if (cargo.type === 'fragile') {
+            this.radioMessage = 'Тележка разбила хрупкий заказ';
+          } else if (cargo.type === 'urgent') {
+            this.radioMessage = 'Тележка увезла срочный заказ';
+          } else {
+            this.radioMessage = 'Тележка увезла заказ';
+          }
+          this.radioMessageTimer = 0.85;
+          this.pushDockPopup(cargo.x, cargo.y, '-' + penalty);
         }
       }
 
       if (cart.x < -120 || cart.x > GAME_WIDTH + 120) {
-        this.carts.splice(i, 1);
+        this.forkliftPatrols.splice(i, 1);
       }
     }
   };
 
-  StorageRunner.prototype.pushFloater = function (x, y, text) {
-    this.floaters.push({
+  AzotShiftRunner.prototype.pushDockPopup = function (x, y, text) {
+    this.dockPopups.push({
       x: x,
       y: y,
       text: text,
@@ -831,25 +988,26 @@
     });
   };
 
-  StorageRunner.prototype.getUiFontSize = function () {
+  AzotShiftRunner.prototype.readTerminalFontSize = function () {
     const rootStyle = window.getComputedStyle(document.documentElement);
     return parseFloat(rootStyle.getPropertyValue('--ui-font-size')) || 16;
   };
 
-  StorageRunner.prototype.updateHud = function () {
-    if (typeof this.options.onHudUpdate === 'function') {
-      this.options.onHudUpdate({
-        playerName: this.playerName,
+  AzotShiftRunner.prototype.broadcastShiftBoard = function () {
+    if (typeof this.options.onShiftBoardUpdate === 'function') {
+      this.options.onShiftBoardUpdate({
+        pickerName: this.pickerAlias,
         testMode: this.testMode,
         score: this.score,
         timeLeft: this.timeLeft,
-        lives: this.lives
+        lives: this.lives,
+        shiftPassport: this.shiftPassport
       });
     }
   };
 
-  StorageRunner.prototype.drawSprite = function (frameName, x, y, w, h, flip) {
-    const frame = SPRITES[frameName];
+  AzotShiftRunner.prototype.drawSprite = function (frameName, x, y, w, h, flip) {
+    const frame = AZOT_FRAMES[frameName];
     if (!this.sprites.complete || !frame) {
       return;
     }
@@ -866,7 +1024,7 @@
     ctx.restore();
   };
 
-  StorageRunner.prototype.drawMetalPanel = function (ctx, x, y, w, h, palette) {
+  AzotShiftRunner.prototype.drawRackPanel = function (ctx, x, y, w, h, palette) {
     const colors = palette || {};
     ctx.save();
     ctx.fillStyle = colors.base || '#273445';
@@ -891,7 +1049,7 @@
     ctx.restore();
   };
 
-  StorageRunner.prototype.drawHazardStrip = function (ctx, x, y, w, h, offset) {
+  AzotShiftRunner.prototype.drawDockHazard = function (ctx, x, y, w, h, offset) {
     const stripeWidth = 12;
     const shift = ((offset || 0) % (stripeWidth * 2) + (stripeWidth * 2)) % (stripeWidth * 2);
     ctx.save();
@@ -912,19 +1070,19 @@
     ctx.restore();
   };
 
-  StorageRunner.prototype.render = function () {
+  AzotShiftRunner.prototype.render = function () {
     const ctx = this.ctx;
 
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     this.renderBackground(ctx);
-    this.renderPlatforms(ctx);
-    this.renderItems(ctx);
-    this.renderBonuses(ctx);
-    this.renderCarts(ctx);
+    this.renderRackPlatforms(ctx);
+    this.renderWarehouseOrders(ctx);
+    this.renderEnergyPickups(ctx);
+    this.renderForkliftPatrols(ctx);
     this.renderPlayer(ctx);
-    this.renderFloaters(ctx);
-    this.renderStatus(ctx);
+    this.renderDockPopups(ctx);
+    this.renderRadioMessage(ctx);
 
     if (this.flashTimer > 0) {
       ctx.fillStyle = 'rgba(255, 120, 120, 0.16)';
@@ -932,7 +1090,8 @@
     }
   };
 
-  StorageRunner.prototype.renderBackground = function (ctx) {
+  AzotShiftRunner.prototype.renderBackground = function (ctx) {
+    // Фон рисуем слоями, чтобы склад не выглядел плоским.
     ctx.fillStyle = '#0d1116';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
@@ -962,20 +1121,20 @@
         const pattern = ctx.createPattern(this.bgTile, 'repeat');
         if (pattern) {
           ctx.save();
-          ctx.translate(-this.bgOffset, 0);
+          ctx.translate(-this.warehouseDrift, 0);
           ctx.globalAlpha = 0.06;
           ctx.fillStyle = pattern;
-          ctx.fillRect(this.bgOffset - 64, WORLD_TOP, GAME_WIDTH + 128, GAME_HEIGHT - WORLD_TOP);
+          ctx.fillRect(this.warehouseDrift - 64, WORLD_TOP, GAME_WIDTH + 128, GAME_HEIGHT - WORLD_TOP);
           ctx.restore();
         }
       }
 
     for (let i = 0; i < 7; i += 1) {
       const lampX = 72 + i * 142;
-      const blink = 0.55 + 0.45 * Math.sin((this.bgOffset * 0.05) + i);
+      const blink = 0.55 + 0.45 * Math.sin((this.warehouseDrift * 0.05) + i);
       ctx.fillStyle = 'rgba(135, 249, 255,' + (0.06 + blink * 0.05).toFixed(3) + ')';
       ctx.fillRect(lampX - 26, WORLD_TOP + 20, 52, 18);
-      this.drawMetalPanel(ctx, lampX - 30, WORLD_TOP + 14, 60, 30, {
+      this.drawRackPanel(ctx, lampX - 30, WORLD_TOP + 14, 60, 30, {
         base: '#47545b',
         top: 'rgba(236, 243, 247, 0.18)',
         bottom: 'rgba(13, 18, 24, 0.32)',
@@ -987,7 +1146,7 @@
 
     const lightWidth = 74;
     const lightSpacing = 126;
-    const lightOffset = (this.bgOffset * 0.4) % lightSpacing;
+    const lightOffset = (this.warehouseDrift * 0.4) % lightSpacing;
     for (let x = -lightWidth - lightOffset; x < GAME_WIDTH + lightWidth; x += lightSpacing) {
       ctx.fillStyle = 'rgba(150, 235, 244, 0.03)';
       ctx.fillRect(x, WORLD_TOP + 86, lightWidth, 6);
@@ -997,7 +1156,7 @@
 
     for (let y = WORLD_TOP + 128; y < FLOOR_Y - 36; y += 156) {
       for (let x = 22; x < GAME_WIDTH - 90; x += 192) {
-        this.drawMetalPanel(ctx, x, y, 112, 76, {
+        this.drawRackPanel(ctx, x, y, 112, 76, {
           base: '#2b343c',
           top: 'rgba(223, 232, 236, 0.12)',
           bottom: 'rgba(12, 18, 24, 0.28)',
@@ -1022,7 +1181,7 @@
       ctx.fillRect(pipeX + 4, WORLD_TOP, 2, FLOOR_Y - WORLD_TOP - 16);
     }
 
-    this.drawMetalPanel(ctx, 0, FLOOR_Y - 22, GAME_WIDTH, 22, {
+    this.drawRackPanel(ctx, 0, FLOOR_Y - 22, GAME_WIDTH, 22, {
       base: '#39444d',
       top: 'rgba(214, 226, 231, 0.22)',
       bottom: 'rgba(10, 14, 18, 0.34)',
@@ -1030,7 +1189,7 @@
       innerStroke: 'rgba(27, 36, 46, 0.8)',
       detail: 'rgba(22, 32, 41, 0.36)'
     });
-    this.drawHazardStrip(ctx, 0, FLOOR_Y - 18, GAME_WIDTH, 10, this.bgOffset * 0.15);
+    this.drawDockHazard(ctx, 0, FLOOR_Y - 18, GAME_WIDTH, 10, this.warehouseDrift * 0.15);
 
     const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, GAME_HEIGHT);
     floorGradient.addColorStop(0, '#1a222b');
@@ -1039,10 +1198,10 @@
     ctx.fillRect(0, FLOOR_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_Y);
   };
 
-  StorageRunner.prototype.renderPlatforms = function (ctx) {
-    for (let i = 1; i < this.platforms.length; i += 1) {
-      const p = this.platforms[i];
-      this.drawMetalPanel(ctx, p.x, p.y, p.w, p.h, {
+  AzotShiftRunner.prototype.renderRackPlatforms = function (ctx) {
+    for (let i = 1; i < this.rackPlatforms.length; i += 1) {
+      const p = this.rackPlatforms[i];
+      this.drawRackPanel(ctx, p.x, p.y, p.w, p.h, {
         base: '#70808d',
         top: 'rgba(228, 237, 241, 0.18)',
         bottom: 'rgba(18, 23, 29, 0.34)',
@@ -1077,81 +1236,81 @@
     }
   };
 
-  StorageRunner.prototype.renderSingleOrder = function (ctx, item) {
-    const isUrgent = item.type === 'urgent';
-    const isFragile = item.type === 'fragile';
-    const pulse = 0.75 + 0.25 * Math.sin(item.pulse);
+  AzotShiftRunner.prototype.renderSingleOrder = function (ctx, cargo) {
+    const isUrgent = cargo.type === 'urgent';
+    const isFragile = cargo.type === 'fragile';
+    const pulse = 0.75 + 0.25 * Math.sin(cargo.pulse);
 
     if (isFragile) {
-      this.drawSprite('fragile', item.x, item.y, item.w, item.h, false);
+      this.drawSprite('glassCrate', cargo.x, cargo.y, cargo.w, cargo.h, false);
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 176, 220, 0.8)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(item.x - 1, item.y - 1, item.w + 2, item.h + 2);
+      ctx.strokeRect(cargo.x - 1, cargo.y - 1, cargo.w + 2, cargo.h + 2);
       ctx.restore();
       return;
     }
 
-    this.drawSprite(isUrgent ? 'paper' : 'box', item.x, item.y, item.w, item.h, false);
+    this.drawSprite(isUrgent ? 'rushInvoice' : 'stockCrate', cargo.x, cargo.y, cargo.w, cargo.h, false);
 
     if (isUrgent) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 191, 89,' + pulse.toFixed(3) + ')';
       ctx.lineWidth = 2;
-      ctx.strokeRect(item.x - 2, item.y - 2, item.w + 4, item.h + 4);
-      const ttlRatio = clamp(item.ttl / 5, 0, 1);
+      ctx.strokeRect(cargo.x - 2, cargo.y - 2, cargo.w + 4, cargo.h + 4);
+      const ttlRatio = clamp(cargo.ttl / 5, 0, 1);
       ctx.fillStyle = 'rgba(255, 179, 71, 0.85)';
-      ctx.fillRect(item.x, item.y - 6, item.w * ttlRatio, 3);
+      ctx.fillRect(cargo.x, cargo.y - 6, cargo.w * ttlRatio, 3);
       ctx.restore();
     }
   };
 
-  StorageRunner.prototype.renderItems = function (ctx) {
-    for (let i = 0; i < this.collectibles.length; i += 1) {
-      const item = this.collectibles[i];
-      const bob = item.state === 'grounded' ? Math.sin(item.bobPhase) * 2 : 0;
+  AzotShiftRunner.prototype.renderWarehouseOrders = function (ctx) {
+    for (let i = 0; i < this.warehouseOrders.length; i += 1) {
+      const cargo = this.warehouseOrders[i];
+      const bob = cargo.state === 'grounded' ? Math.sin(cargo.bobPhase) * 2 : 0;
 
       ctx.fillStyle = 'rgba(255, 232, 150, 0.15)';
       ctx.beginPath();
-      ctx.ellipse(item.x + item.w / 2, item.y + item.h + 8 + bob, item.w / 1.1, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(cargo.x + cargo.w / 2, cargo.y + cargo.h + 8 + bob, cargo.w / 1.1, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
       this.renderSingleOrder(ctx, {
-        x: item.x,
-        y: item.y + bob,
-        w: item.w,
-        h: item.h,
-        type: item.type,
-        ttl: item.ttl,
-        pulse: item.pulse
+        x: cargo.x,
+        y: cargo.y + bob,
+        w: cargo.w,
+        h: cargo.h,
+        type: cargo.type,
+        ttl: cargo.ttl,
+        pulse: cargo.pulse
       });
     }
   };
 
-  StorageRunner.prototype.renderBonuses = function (ctx) {
-    for (let i = 0; i < this.bonuses.length; i += 1) {
-      const bonus = this.bonuses[i];
-      const bob = Math.sin(bonus.bobPhase) * 2.5;
+  AzotShiftRunner.prototype.renderEnergyPickups = function (ctx) {
+    for (let i = 0; i < this.energyPickups.length; i += 1) {
+      const energyCan = this.energyPickups[i];
+      const bob = Math.sin(energyCan.bobPhase) * 2.5;
 
       ctx.fillStyle = 'rgba(108, 255, 187, 0.18)';
       ctx.beginPath();
-      ctx.ellipse(bonus.x + bonus.w / 2, bonus.y + bonus.h + 8 + bob, bonus.w / 1.3, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(energyCan.x + energyCan.w / 2, energyCan.y + energyCan.h + 8 + bob, energyCan.w / 1.3, 5, 0, 0, Math.PI * 2);
       ctx.fill();
-      this.drawSprite('energy', bonus.x, bonus.y + bob, bonus.w, bonus.h, false);
+      this.drawSprite('energyCan', energyCan.x, energyCan.y + bob, energyCan.w, energyCan.h, false);
     }
   };
 
-  StorageRunner.prototype.renderCarts = function (ctx) {
-    for (let i = 0; i < this.carts.length; i += 1) {
-      const cart = this.carts[i];
+  AzotShiftRunner.prototype.renderForkliftPatrols = function (ctx) {
+    for (let i = 0; i < this.forkliftPatrols.length; i += 1) {
+      const cart = this.forkliftPatrols[i];
       const frame = Math.floor(cart.anim) % 2 === 0 ? 'cart1' : 'cart2';
       this.drawSprite(frame, cart.x, cart.y, cart.w, cart.h, cart.dir < 0);
     }
   };
 
-  StorageRunner.prototype.getPlayerDrawParams = function () {
+  AzotShiftRunner.prototype.getPlayerDrawRect = function () {
     const player = this.player;
-    const frame = SPRITES[player.frameIndex] || SPRITES.playerIdle;
+    const frame = AZOT_FRAMES[player.frameIndex] || AZOT_FRAMES.playerIdle;
     return {
       x: player.x + (frame.ox || 0),
       y: player.y + (frame.oy || 0),
@@ -1160,9 +1319,9 @@
     };
   };
 
-  StorageRunner.prototype.renderPlayer = function (ctx) {
+  AzotShiftRunner.prototype.renderPlayer = function (ctx) {
     const player = this.player;
-    const draw = this.getPlayerDrawParams();
+    const draw = this.getPlayerDrawRect();
     if (player.invulnerability > 0 && Math.floor(player.invulnerability * 14) % 2 === 0) {
       return;
     }
@@ -1190,35 +1349,35 @@
       ctx.fillStyle = 'rgba(120, 184, 255, 0.12)';
       ctx.fillRect(draw.x - 10, draw.y - 18, 58, 16);
       ctx.fillStyle = '#eaf5ff';
-      ctx.font = Math.max(10, Math.round(this.getUiFontSize() * 0.75)) + 'px Segoe UI';
+      ctx.font = Math.max(10, Math.round(this.readTerminalFontSize() * 0.75)) + 'px Segoe UI';
       ctx.fillText('TEST', draw.x, draw.y - 6);
     }
   };
 
-  StorageRunner.prototype.renderFloaters = function (ctx) {
+  AzotShiftRunner.prototype.renderDockPopups = function (ctx) {
     ctx.save();
-    ctx.font = 'bold ' + Math.round(this.getUiFontSize() * 1.125) + 'px Segoe UI';
+    ctx.font = 'bold ' + Math.round(this.readTerminalFontSize() * 1.125) + 'px Segoe UI';
     ctx.textAlign = 'center';
 
-    for (let i = 0; i < this.floaters.length; i += 1) {
-      const floater = this.floaters[i];
-      const alpha = clamp(floater.life, 0, 1);
-      ctx.fillStyle = floater.text.indexOf('-') === 0
+    for (let i = 0; i < this.dockPopups.length; i += 1) {
+      const popup = this.dockPopups[i];
+      const alpha = clamp(popup.life, 0, 1);
+      ctx.fillStyle = popup.text.indexOf('-') === 0
         ? 'rgba(255, 132, 132,' + alpha.toFixed(3) + ')'
         : 'rgba(173, 255, 202,' + alpha.toFixed(3) + ')';
-      ctx.fillText(floater.text, floater.x + 12, floater.y);
+      ctx.fillText(popup.text, popup.x + 12, popup.y);
     }
 
     ctx.restore();
   };
 
-  StorageRunner.prototype.renderStatus = function (ctx) {
-    if (!this.statusText) {
+  AzotShiftRunner.prototype.renderRadioMessage = function (ctx) {
+    if (!this.radioMessage) {
       return;
     }
 
     ctx.save();
-    this.drawMetalPanel(ctx, 314, 84, 396, 48, {
+    this.drawRackPanel(ctx, 314, 84, 396, 48, {
       base: 'rgba(39, 49, 60, 0.95)',
       top: 'rgba(219, 231, 236, 0.18)',
       bottom: 'rgba(11, 16, 21, 0.35)',
@@ -1233,13 +1392,13 @@
     ctx.fillStyle = statusGlow;
     ctx.fillRect(320, 90, 384, 4);
     ctx.fillStyle = '#eff9fb';
-    ctx.font = '600 ' + Math.round(this.getUiFontSize() * 1.25) + 'px Segoe UI';
+    ctx.font = '600 ' + Math.round(this.readTerminalFontSize() * 1.25) + 'px Segoe UI';
     ctx.textAlign = 'center';
-    ctx.fillText(this.statusText, 512, 114);
+    ctx.fillText(this.radioMessage, 512, 114);
     ctx.restore();
   };
 
   window.AZOTGame = {
-    StorageRunner: StorageRunner
+    AzotShiftRunner: AzotShiftRunner
   };
 })();

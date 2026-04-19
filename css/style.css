@@ -1,15 +1,19 @@
+/* Глобальные пользовательские свойства 
+CSS для размера шрифтов, цветов текста */
 :root {
   --ui-font-size: 16px;
-  --bg: #212025;
-  --panel: rgba(67, 53, 79, 0.92);
-  --panel-border: rgba(250, 234, 221, 0.18);
-  --accent: #b68f9c;
-  --accent-strong: #c06d3d;
-  --accent-orange: #da6c2d;
-  --accent-cyan: #b7a7c8;
-  --danger: #e24c4c;
-  --success: #7deb8d;
-  --shadow: 0 18px 42px rgba(10, 10, 12, 0.52);
+  --text-main: #fcf8f5;
+  --text-soft: #fff0f6;
+  --text-muted: #ffe3ee;
+  --panel-stroke: rgba(250, 234, 221, 0.16);
+  --panel-gloss: rgba(250, 234, 221, 0.08);
+  --deep-shadow: 0 18px 42px rgba(10, 10, 12, 0.52);
+  --violet-strong: #734896;
+  --violet-deep: #522a6f;
+  --orange-strong: #ff9a52;
+  --orange-deep: #ff8a3d;
+  --rose-soft: #d6a3b4;
+  --danger-soft: rgba(255, 132, 132, 0.24);
 }
 
 * {
@@ -20,26 +24,27 @@ html,
 body {
   height: 100%;
   margin: 0;
-  overflow: hidden; /* Запрещает прокрутку страницы */
+  overflow: hidden;
 }
 
 body {
+  color: var(--text-main);
   font-family: "Segoe UI", Tahoma, sans-serif;
   font-size: var(--ui-font-size);
-  color: #fcf8f5;
   background:
     radial-gradient(circle at top, rgba(196, 108, 58, 0.09), transparent 22%),
     linear-gradient(180deg, #3b274d 0%, #2b1f39 32%, #211925 62%, #181619 100%);
 }
 
-.page-shell {
+/* Контейнер оболочки с центрированием и отступами.*/
+.azot-shift-shell {
   min-height: 100%;
   display: grid;
   place-items: start center;
   padding: 8px 24px 24px;
 }
 
-.app {
+.azot-mainframe {
   position: relative;
   width: 1024px;
   height: 768px;
@@ -52,8 +57,8 @@ body {
     linear-gradient(180deg, rgba(250, 234, 221, 0.03), transparent),
     linear-gradient(180deg, #4b315f, #311f42 38%, #181619 100%);
 }
-
-.screen {
+/*Экран смены: скрыт, переход при смене класса.*/
+.azot-scene {
   position: absolute;
   inset: 0;
   display: none;
@@ -62,71 +67,58 @@ body {
   transition: opacity 280ms ease, transform 280ms ease;
 }
 
-.screen.active {
+.azot-scene.active {
   display: block;
   opacity: 1;
   transform: scale(1);
 }
 
-.screen-panel {
+.azot-console-panel {
   width: min(768px, calc(100% - 72px));
   margin: 40px auto;
   padding: 28px 32px;
+  border-radius: 24px;
+  border: 1px solid var(--panel-stroke);
   background:
     linear-gradient(180deg, rgba(250, 234, 221, 0.06), transparent 18%),
     linear-gradient(180deg, rgba(72, 47, 92, 0.88), rgba(52, 33, 67, 0.9) 42%, rgba(24, 22, 25, 0.98));
-  box-shadow: var(--shadow);
+  box-shadow: var(--deep-shadow);
 }
 
-#start-screen,
-#end-screen {
+#azot-dispatch-scene,
+#shift-ledger-scene {
   overflow: hidden;
   padding-bottom: 16px;
 }
 
-#end-screen {
+#azot-dispatch-scene {
+  background:
+    linear-gradient(90deg, rgba(24, 22, 25, 0.82) 0%, rgba(42, 24, 56, 0.68) 44%, rgba(214, 163, 180, 0.08) 76%, rgba(196, 108, 58, 0.08) 100%),
+    url("../assets/menu.png") 76% center / cover no-repeat,
+    linear-gradient(180deg, rgba(81, 51, 104, 0.9), rgba(34, 29, 39, 0.94)),
+    #181619;
+}
+
+#shift-ledger-scene {
   background:
     linear-gradient(180deg, rgba(50, 32, 66, 0.98), rgba(38, 27, 48, 0.99) 34%, rgba(24, 22, 25, 1)),
     #181619;
 }
-
-#start-screen {
-  isolation: isolate;
-  background:
-    linear-gradient(180deg, rgba(66, 40, 86, 0.98), rgba(50, 32, 66, 0.98) 40%, rgba(24, 22, 25, 0.99)),
-    #181619;
-}
-
-#start-screen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(90deg, rgba(24, 22, 25, 0.82) 0%, rgba(42, 24, 56, 0.68) 44%, rgba(214, 163, 180, 0.08) 76%, rgba(196, 108, 58, 0.08) 100%),
-    linear-gradient(180deg, rgba(250, 234, 221, 0.02), transparent 24%),
-    url("../assets/menu.png") 76% center / cover no-repeat,
-    linear-gradient(180deg, #533568, #342142 44%, #22182b 100%);
-  filter: saturate(0.46) brightness(0.58);
-}
-
-#start-screen::after {
-  content: none;
-}
-
-.start-panel {
+/* Диспетчерская панель: фиксированный размер, сетка с 4 строками (средняя занимает
+ оставшееся место), позиционирование с отступами, скрывает переполнение, внешняя тень
+и внутренние границы. */
+.dispatch-console {
   position: relative;
   z-index: 1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   row-gap: 16px;
   width: 688px;
+  height: 690px;
   margin: 32px 0 0 52px;
   padding: 30px 24px 16px;
-  height: 690px;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.1), transparent 12%),
     linear-gradient(180deg, rgba(76, 48, 96, 0.72), rgba(52, 33, 67, 0.7) 42%, rgba(38, 27, 48, 0.68) 72%, rgba(24, 22, 25, 0.76));
   box-shadow:
     0 22px 40px rgba(0, 0, 0, 0.42),
@@ -134,349 +126,260 @@ body {
     inset 0 1px 0 rgba(250, 234, 221, 0.08);
 }
 
-.start-panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 18px;
-  border-bottom: 1px solid rgba(58, 33, 78, 0.72);
-  border-radius: 10px 10px 0 0;
-  background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.1), rgba(250, 234, 221, 0)),
-    linear-gradient(180deg, #d6a3b4, #8d6ba1);
-}
-
-.start-panel::after {
-  content: "";
-  position: absolute;
-  top: 5px;
-  left: 12px;
-  width: 42px;
-  height: 8px;
-  background:
-    linear-gradient(90deg, #c46c3a 0 8px, transparent 8px 12px, #d6a3b4 12px 20px, transparent 20px 24px, #cbb8de 24px 32px, transparent 32px 36px, #c46c3a 36px 42px);
-  opacity: 0.7;
-}
-
-.start-panel > * {
+/* Дочерние блоки держим поверх фона панели. */
+.dispatch-console > *,
+.handover-ledger-panel > *,
+.pause-bay-panel > * {
   position: relative;
   z-index: 1;
 }
 
-.start-top {
+.dispatch-briefhead {
   display: block;
-  margin-bottom: 0;
   padding: 6px 0 12px;
+  margin-bottom: 0;
   border-bottom: 1px solid rgba(122, 138, 147, 0.22);
 }
 
-.start-top::after {
-  content: none;
-}
-
-.start-top::before {
-  content: none;
-}
-
-.start-title-copy {
+.shift-pitch {
   display: grid;
   gap: 6px;
 }
 
-.start-gif {
-  width: 68px;
-  height: 78px;
-  object-fit: contain;
-  display: block;
-  padding: 2px;
-  animation: previewFloat 3.2s ease-in-out infinite;
-  flex: 0 0 auto;
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
-}
-
-.end-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 690px;
-  margin-top: 14px;
-  margin-bottom: 0;
-  padding-top: 34px;
-  padding-bottom: 16px;
-}
-
-.end-panel,
-.overlay-card {
-  position: relative;
-  overflow: hidden;
-}
-
-.end-panel::before,
-.overlay-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(255, 138, 61, 0.5), rgba(242, 156, 183, 0.24) 38%, transparent 72%) top left / 100% 3px no-repeat;
-}
-
-.end-panel > *,
-.overlay-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.eyebrow {
+.azot-kicker {
   margin: 0 0 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
+  color: var(--rose-soft);
   font-size: 0.75rem;
-  color: #d6a3b4;
+  text-transform: uppercase;
 }
 
-.start-panel .eyebrow {
-  color: #d6a3b4;
-  text-shadow: none;
+.dispatch-console .azot-kicker {
   margin: 0;
 }
 
-.game-title {
+.dispatch-headline {
   margin: 0;
-  font-size: 2.5rem;
-  line-height: 1.05;
   color: #fffdf9;
-  animation: titlePulse 2.6s ease-in-out infinite;
-}
-
-.start-panel .game-title {
-  max-width: none;
   font-size: 2.35rem;
   line-height: 1.08;
 }
 
-.start-panel .subtitle {
+.dispatch-subnote {
   max-width: none;
-  color: #fff0f6;
-  line-height: 1.3;
+  margin: 0;
+  color: var(--text-soft);
   font-size: 1rem;
+  line-height: 1.3;
 }
 
-.instructions {
-  margin-top: 12px;
-  padding: 16px 18px;
-  border-radius: 20px;
-  background: rgba(250, 234, 221, 0.03);
-  border: 1px solid rgba(250, 234, 221, 0.1);
+.loader-mascot {
+  display: block;
+  width: 68px;
+  height: 78px;
+  padding: 2px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
-.start-panel .instructions {
-  overflow-y: auto;
+.shift-reglament {
   margin-top: 0;
   padding: 10px 14px 8px;
+  overflow-y: auto;
   border-radius: 8px;
+  border: 1px solid rgba(250, 234, 221, 0.12);
   background:
     linear-gradient(180deg, rgba(250, 234, 221, 0.05), transparent 12%),
     linear-gradient(180deg, rgba(78, 47, 101, 0.64), rgba(58, 33, 78, 0.58) 48%, rgba(32, 24, 40, 0.56));
-  border-color: rgba(250, 234, 221, 0.12);
   box-shadow:
     inset 0 0 0 1px rgba(39, 45, 78, 0.2),
     0 10px 18px rgba(0, 0, 0, 0.12);
 }
 
-.instructions-head {
+.shift-reglament-head {
   position: relative;
   min-height: 40px;
-  padding-right: 82px;
   margin-bottom: 6px;
+  padding-right: 82px;
 }
 
-.instructions-head h2 {
-  margin: 0;
-  line-height: 1.2;
-}
-
-.instructions h2 {
+.shift-reglament-head h2,
+.shift-reglament h2 {
   margin: 0;
   font-size: 1.2rem;
-}
-
-.start-panel .instructions h2 {
+  line-height: 1.2;
   color: #fffaf6;
 }
 
-.instructions-head .start-gif {
+.shift-reglament-head .loader-mascot {
   position: absolute;
   top: -4px;
   right: 0;
 }
 
-.instructions ol {
+.shift-reglament ol {
   margin: 0;
   padding-left: 20px;
 }
 
-.instructions li {
-  opacity: 0;
-  transform: translateX(-10px);
-  animation: fadeList 700ms ease forwards;
-  animation-delay: var(--delay);
+.shift-reglament li {
   margin-bottom: 5px;
   line-height: 1.24;
 }
 
-.input-block {
+.picker-pass-form {
   display: grid;
   gap: 6px;
   margin-top: 4px;
 }
 
-.input-block span {
+.picker-pass-form span {
+  color: var(--text-soft);
   font-weight: 600;
-  color: #fff7f2;
 }
 
-.start-panel .input-block span {
-  color: #fff0f6;
-}
-
-.input-block input {
+.picker-pass-form input {
   width: 100%;
   padding: 11px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(250, 234, 221, 0.16);
-  background: rgba(34, 32, 35, 0.62);
   color: #fffdf9;
-  outline: none;
   font: inherit;
+  outline: none;
+  border-radius: 16px;
+  border: 1px solid rgba(250, 234, 221, 0.18);
+  background: rgba(34, 32, 35, 0.56);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.input-block input:focus {
-  border-color: rgba(255, 138, 61, 0.82);
-  box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16);
-}
-
-.start-panel .input-block input {
-  border-color: rgba(250, 234, 221, 0.18);
-  background: rgba(34, 32, 35, 0.56);
-}
-
-.start-panel .input-block input:focus {
+.picker-pass-form input:focus {
   border-color: rgba(255, 138, 61, 0.82);
   box-shadow:
     0 0 0 3px rgba(255, 138, 61, 0.14),
     0 0 18px rgba(242, 156, 183, 0.18);
 }
 
-.start-actions,
-.end-actions {
-  margin-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
+.shift-passport-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  align-items: center;
 }
 
-.start-panel .start-actions {
+.passport-slot {
+  display: grid;
+  gap: 6px;
+}
+
+.passport-slot span {
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.passport-slot select {
+  width: 100%;
+  padding: 11px 14px;
+  color: #fffdf9;
+  font: inherit;
+  outline: none;
+  border-radius: 16px;
+  border: 1px solid rgba(250, 234, 221, 0.18);
+  background: rgba(34, 32, 35, 0.56);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.passport-slot select:focus {
+  border-color: rgba(255, 138, 61, 0.82);
+  box-shadow:
+    0 0 0 3px rgba(255, 138, 61, 0.14),
+    0 0 18px rgba(242, 156, 183, 0.18);
+}
+
+.dispatch-control-row,
+.handover-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.dispatch-console .dispatch-control-row {
   justify-content: space-between;
 }
 
-.end-actions {
+.handover-control-row {
   margin-top: 16px;
-  position: static;
   padding-top: 2px;
-  background: transparent;
 }
 
-.primary-btn,
-.icon-btn {
-  border: 0;
-  border-radius: 16px;
+.shift-btn,
+.console-btn {
   padding: 12px 16px;
-  font: inherit;
   color: #f8fbff;
+  font: inherit;
   cursor: pointer;
+  border-radius: 16px;
+  border: 0;
   transition: transform 150ms ease, filter 150ms ease, background 150ms ease;
 }
 
-.primary-btn {
+.shift-btn {
   min-width: 186px;
-  background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.08), transparent 18%),
-    linear-gradient(180deg, #734896, #522a6f);
   font-weight: 700;
-  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.24);
-}
-
-.start-panel .primary-btn {
   background:
     linear-gradient(180deg, rgba(250, 234, 221, 0.24), transparent 18%),
-    linear-gradient(180deg, #ff9a52, #ff8a3d);
-  color: #fffdf9;
+    linear-gradient(180deg, var(--orange-strong), var(--orange-deep));
   box-shadow:
     0 18px 34px rgba(255, 138, 61, 0.24),
     0 0 28px rgba(242, 156, 183, 0.14),
     inset 0 0 0 1px rgba(250, 234, 221, 0.28);
 }
 
-.icon-btn {
-  background: rgba(250, 234, 221, 0.04);
-  border: 1px solid rgba(250, 234, 221, 0.12);
-}
-
-.start-panel .icon-btn {
-  background: rgba(45, 32, 58, 0.58);
-  border-color: rgba(221, 170, 255, 0.24);
+.console-btn {
   color: #fff7f2;
+  border: 1px solid rgba(221, 170, 255, 0.24);
+  background: rgba(45, 32, 58, 0.58);
 }
 
-.hud-group-actions .icon-btn,
-.end-actions .icon-btn,
-.overlay-card .primary-btn,
-.end-panel .primary-btn {
-  background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.08), transparent 18%),
-    linear-gradient(180deg, #734896, #522a6f);
-  border: 1px solid rgba(250, 234, 221, 0.16);
+.hud-cluster-actions .console-btn,
+.handover-control-row .console-btn,
+.pause-bay-panel .shift-btn,
+.handover-ledger-panel .shift-btn {
   color: #fffaf6;
+  border: 1px solid rgba(250, 234, 221, 0.16);
+  background:
+    linear-gradient(180deg, var(--panel-gloss), transparent 18%),
+    linear-gradient(180deg, var(--violet-strong), var(--violet-deep));
   box-shadow:
     0 10px 18px rgba(0, 0, 0, 0.22),
     inset 0 0 0 1px rgba(16, 21, 27, 0.22);
 }
 
-.hud-group-actions .icon-btn:first-child,
-.overlay-card .primary-btn,
-.end-panel .primary-btn {
+.pause-bay-panel .shift-btn,
+.handover-ledger-panel .shift-btn,
+.hud-cluster-actions .console-btn:first-child {
   background:
     linear-gradient(180deg, rgba(250, 234, 221, 0.2), transparent 18%),
-    linear-gradient(180deg, #ff9a52, #ff8a3d);
+    linear-gradient(180deg, var(--orange-strong), var(--orange-deep));
 }
 
-.primary-btn:hover,
-.icon-btn:hover {
+.shift-btn:hover,
+.console-btn:hover {
   transform: translateY(-2px) scale(1.01);
   filter: brightness(1.09);
 }
 
-.primary-btn:disabled {
+.shift-btn:disabled {
+  opacity: 0.62;
   cursor: not-allowed;
   filter: grayscale(0.4);
-  opacity: 0.62;
 }
 
-.inline-settings {
+.terminal-toggles {
   display: flex;
-  gap: 10px;
   flex-wrap: wrap;
-}
-
-.start-panel .inline-settings {
+  gap: 10px;
   margin-left: auto;
 }
 
-#game-screen {
+#rack-floor-scene {
   background:
     linear-gradient(180deg, rgba(250, 234, 221, 0.04), transparent 16%),
     linear-gradient(180deg, #482563, #2d1d3d 42%, #181619);
@@ -488,203 +391,187 @@ body {
   height: 100%;
 }
 
-.hud {
+.main-hud {
   position: absolute;
   top: 14px;
   left: 14px;
   right: 14px;
+  z-index: 10;
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  z-index: 10;
   pointer-events: none;
 }
 
-.hud-group {
+.hud-cluster {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
+  gap: 10px;
 }
 
-.hud-group-center {
+.hud-cluster-center {
   justify-content: center;
 }
 
-.hud-group-actions {
-  pointer-events: auto;
+.hud-cluster-actions {
   justify-content: flex-end;
+  pointer-events: auto;
 }
 
-.hud-card {
+.hud-pill {
   min-width: 104px;
   padding: 10px 14px;
   border-radius: 18px;
+  border: 1px solid var(--panel-stroke);
   background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.1), transparent 18%),
     linear-gradient(180deg, rgba(88, 50, 116, 0.9), rgba(38, 27, 49, 0.92));
-  border: 1px solid rgba(250, 234, 221, 0.16);
-  backdrop-filter: blur(4px);
-  box-shadow: inset 0 0 0 1px rgba(13, 17, 23, 0.3);
-  transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
-.timer-card {
+.shift-timer-pill {
   min-width: 130px;
 }
 
-.hud-label {
+.hud-caption {
   display: block;
+  color: var(--text-muted);
   font-size: 0.78rem;
-  color: #ffe3ee;
 }
 
-.hud-value {
+.hud-reading {
   display: block;
   margin-top: 2px;
+  color: #fffdf9;
   font-size: 1.15rem;
   font-weight: 700;
-  color: #fffdf9;
 }
 
-.overlay {
+.shift-overlay {
   position: absolute;
   inset: 0;
+  z-index: 20;
   display: grid;
   place-items: center;
   background: rgba(34, 32, 35, 0.82);
-  z-index: 20;
 }
 
-.overlay.hidden,
-.rank-note.hidden {
+.shift-overlay.hidden,
+.picker-ledger-place.hidden {
   display: none;
 }
 
-.overlay-card {
-  min-width: 320px;
-  padding: 28px;
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.1), transparent 16%),
-    linear-gradient(180deg, rgba(88, 50, 116, 0.94), rgba(58, 33, 78, 0.96) 52%, rgba(24, 22, 25, 0.98));
-  border: 1px solid rgba(250, 234, 221, 0.16);
-  box-shadow:
-    0 26px 56px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 1px rgba(14, 18, 23, 0.24);
-  text-align: center;
+.pause-bay-panel,
+.handover-ledger-panel {
+  position: relative;
+  overflow: hidden;
 }
 
-.overlay-card h2 {
+.pause-bay-panel {
+  min-width: 320px;
+  padding: 28px;
+  text-align: center;
+  border-radius: 24px;
+  border: 1px solid var(--panel-stroke);
+  background:
+    linear-gradient(180deg, rgba(88, 50, 116, 0.94), rgba(58, 33, 78, 0.96) 52%, rgba(24, 22, 25, 0.98));
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.36);
+}
+
+.pause-bay-panel h2 {
   margin-top: 0;
 }
 
-.overlay-actions {
+.pause-bay-actions {
   display: flex;
   justify-content: center;
   margin-top: 20px;
 }
 
-.leaderboard-wrap {
-  margin-top: 20px;
-  padding: 16px;
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(250, 234, 221, 0.08), transparent 14%),
-    linear-gradient(180deg, rgba(88, 50, 116, 0.84), rgba(58, 33, 78, 0.92) 58%, rgba(24, 22, 25, 0.95));
-  border: 1px solid rgba(250, 234, 221, 0.14);
-  max-height: 372px;
-  overflow-y: auto;
+.handover-ledger-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 690px;
+  margin-top: 14px;
+  margin-bottom: 0;
+  padding-top: 34px;
+  padding-bottom: 16px;
 }
 
-.leaderboard-wrap h3 {
+.brigade-ledger {
+  max-height: 372px;
+  margin-top: 20px;
+  padding: 16px;
+  overflow-y: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(250, 234, 221, 0.14);
+  background:
+    linear-gradient(180deg, rgba(88, 50, 116, 0.84), rgba(58, 33, 78, 0.92) 58%, rgba(24, 22, 25, 0.95));
+}
+
+.brigade-ledger h3 {
   margin-top: 0;
 }
 
-.leaderboard {
+.brigade-ledger-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.leaderboard th,
-.leaderboard td {
+.brigade-ledger-table th,
+.brigade-ledger-table td {
   padding: 10px 8px;
   text-align: left;
   border-bottom: 1px solid rgba(250, 234, 221, 0.12);
 }
 
-.leaderboard td:last-child,
-.leaderboard th:last-child {
+.brigade-ledger-table th:last-child,
+.brigade-ledger-table td:last-child {
   text-align: right;
 }
 
-.leaderboard-row-own {
+.brigade-row-current {
   background: rgba(242, 156, 183, 0.18);
 }
 
-.leaderboard-row-own td {
+.brigade-row-current td {
   font-weight: 700;
 }
 
-.rank-note {
+.picker-ledger-place {
   margin-top: 16px;
   padding: 12px 14px;
+  color: #fffaf6;
   border-radius: 16px;
   background: rgba(242, 156, 183, 0.16);
-  color: #fffaf6;
-}
-
-@keyframes fadeList {
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes titlePulse {
-  0%,
-  100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-
-@keyframes previewFloat {
-  0%,
-  100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
 }
 
 @media (max-width: 900px) {
-  .start-panel {
+  .dispatch-console {
     width: min(700px, calc(100% - 32px));
+    height: auto;
     margin: 24px auto 0;
     padding: 34px 16px 18px;
-    height: auto;
   }
 
-  .start-top {
-    display: block;
-  }
-
-  .start-top::before,
-  .start-top::after {
-    display: none;
-  }
-
-  .start-gif {
+  .loader-mascot {
     width: 64px;
     height: 72px;
   }
 
-  .start-panel .start-actions {
+  .dispatch-console .dispatch-control-row {
     justify-content: flex-start;
   }
 
-  .start-panel .inline-settings {
+  .shift-passport-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-toggles {
     margin-left: 0;
   }
 }
 
 @media (max-width: 1100px) {
-  .page-shell {
+  .azot-shift-shell {
     overflow: auto;
   }
 }
