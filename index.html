@@ -9,7 +9,7 @@
 <body>
   <div class="azot-shift-shell">
     <main class="azot-mainframe" aria-label="Игра Склад Азот: Собирай заказы!">
-      <!-- Диспетчерский экран: здесь сотрудник получает вводные по смене -->
+      <!-- Диспетчерский экран -->
       <section id="azot-dispatch-scene" class="azot-scene active">
         <div class="azot-console-panel dispatch-console">
           <div class="dispatch-briefhead">
@@ -20,7 +20,7 @@
             </div>
           </div>
 
-          <!-- Короткий регламент смены для нового комплектовщика -->
+          <!-- Короткий регламент смены для понимания предстоящей работы и требований к работнику -->
           <div class="shift-reglament">
             <div class="shift-reglament-head">
               <h2>Как играть</h2>
@@ -40,7 +40,7 @@
             </ol>
           </div>
 
-          <!-- Паспорт смены влияет на поток заказов и попадёт в журнал результатов -->
+          <!-- Паспорт смены влияет на поток заказов, чтобы разнообразить сессии и повысить реиграбельность -->
           <div class="shift-passport-grid">
             <label class="passport-slot" for="azot-sector-code">
               <span>Участок склада</span>
@@ -76,7 +76,7 @@
         </div>
       </section>
 
-      <!-- Рабочий экран: стеллажи, заказы и верхний щит смены -->
+      <!-- Рабочий экран: стеллажи, заказы и верхний ввод смены -->
       <section id="rack-floor-scene" class="azot-scene" aria-hidden="true">
         <canvas id="game-canvas" width="1024" height="768" aria-label="Игровое поле"></canvas>
 
@@ -125,7 +125,7 @@
         </div>
       </section>
 
-      <!-- Экран сдачи смены: итог, замечания и журнал бригады -->
+      <!-- Экран сдачи смены: итог, замечания и журнал -->
       <section id="shift-ledger-scene" class="azot-scene" aria-hidden="true">
         <div class="azot-console-panel handover-ledger-panel">
           <p class="azot-kicker">Отчёт работника</p>

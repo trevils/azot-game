@@ -126,7 +126,8 @@ body {
     inset 0 1px 0 rgba(250, 234, 221, 0.08);
 }
 
-/* Дочерние блоки держим поверх фона панели. */
+/* Дочерние блоки поверх фона панели. Это для элементов
+ с абсолютным позиционированием внутри, чтобы они не перекрывались фоном. */
 .dispatch-console > *,
 .handover-ledger-panel > *,
 .pause-bay-panel > * {
@@ -209,10 +210,10 @@ body {
   line-height: 1.2;
   color: #fffaf6;
 }
-
+а
 .shift-reglament-head .loader-mascot {
   position: absolute;
-  top: -4px;
+  top: -5px;
   right: 0;
 }
 
@@ -462,7 +463,11 @@ body {
 .pause-bay-panel,
 .handover-ledger-panel {
   position: relative;
-  overflow: hidden;
+}
+
+.handover-ledger-panel {
+  overflow-y: auto;
+  max-height: calc(100% - 24px);
 }
 
 .pause-bay-panel {
@@ -494,6 +499,10 @@ body {
   margin-bottom: 0;
   padding-top: 34px;
   padding-bottom: 16px;
+}
+
+.handover-control-row {
+  margin-top: auto;
 }
 
 .brigade-ledger {
@@ -534,6 +543,13 @@ body {
 
 .brigade-row-current td {
   font-weight: 700;
+}
+
+.end-summary,
+.end-extra {
+  margin: 0 24px 16px;
+  line-height: 1.55;
+  word-break: break-word;
 }
 
 .picker-ledger-place {

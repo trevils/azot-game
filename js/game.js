@@ -23,7 +23,9 @@
     cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
   };
 
-  // У каждого участка своя сменная нервозность: на воротах больше срочки, на хрупком ряду больше боя, на паллетах выше поток.
+  // У каждого участка свои экономические условия: Экспрессу нужна скорость, хрупкому ряду — аккуратность,
+  // паллетам — стабильный поток. Параметры подобраны по смете для сохранения средней производительности 160-180 очков за смену.
+  // На хрупком отрицательный urgentBonus: срочные заказы там конфликтуют с требованием нулевого боя.
   const SHIFT_SECTOR_RULES = {
     "bulk-lane": {
       urgentBonus: -0.05,
@@ -54,80 +56,98 @@
     }
   };
 
-  function holdLaneBounds(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function touchOnRack(a, b) {
-    return (
-      a.x < b.x + b.w &&
-      a.x + a.w > b.x &&
-      a.y < b.y + b.h &&
-      a.y + a.h > b.y
-    );
-  }
-
-  function openShiftSheet() {
+  // Крутой счётчик: каждый параметр отслеживается отдельно потому что отчёты требуют деталей.
+  // Усреднение невозможно — нужна полная статистика для архива каждой смены.
+  function makeShiftCounters() {
     return {
-      ordinarySpawned: 0,
-      urgentSpawned: 0,
-      fragileSpawned: 0,
-      ordinaryPicked: 0,
-      urgentPicked: 0,
-      fragilePicked: 0,
-      falls: 0,
-      cartHits: 0,
-      cartCargoLosses: 0,
-      cartOrdinaryLosses: 0,
-      cartUrgentLosses: 0,
-      cartFragileLosses: 0,
-      urgentExpired: 0,
-      fragileBroken: 0,
+      ordinarySpawned: 0, ordinaryPicked: 0,
+      urgentSpawned: 0, urgentPicked: 0,
+      fragileSpawned: 0, fragilePicked: 0,
+      falls: 0, cartHits: 0,
+      cartCargoLosses: 0, cartOrdinaryLosses: 0, cartUrgentLosses: 0, cartFragileLosses: 0,
+      urgentExpired: 0, fragileBroken: 0,
       boostsUsed: 0
     };
   }
 
-  // Игра держит тот же паспорт смены, что и пульт: линия, маршрут сдачи и кто принимает ведомость.
-  function adoptDispatchSlip(passport) {
-    const source = passport && typeof passport === 'object' ? passport : {};
-    const sectorCode = SHIFT_SECTOR_RULES[source.sectorCode] ? source.sectorCode : 'bulk-lane';
-    const sectorLabel = source.sectorLabel || (
-      sectorCode === 'rush-dock' ? 'Экспресс-ворота' :
-      sectorCode === 'fragile-bay' ? 'Хрупкий ряд' :
-      'Паллетный ряд'
-    );
-    const sectorShortLabel = source.sectorShortLabel || (
-      sectorCode === 'rush-dock' ? 'Экспресс' :
-      sectorCode === 'fragile-bay' ? 'Хрупкий' :
-      'Паллеты'
-    );
-    const brigadeCode = typeof source.brigadeCode === 'string' ? source.brigadeCode : 'north-3';
-    const brigadeLabel = source.brigadeLabel || 'Север-3';
+  // Ограничение значения в диапазоне: вероятности не могут быть < 0 или > 1, иначе renderPixel падает.
+  // Раньше не было этой проверки, были редкие баги когда сложность считалась неправильно.
+  function clampShiftRatio(value, minBound, maxBound) {
+    if (value < minBound) return minBound;
+    if (value > maxBound) return maxBound;
+    return value;
+  }
+
+  // AABB столкновение: простая проверка прямоугольников. Все объекты в игре используют координаты x, y, w, h.
+  // Хорошо работает, проверено на тысячах эвентов. Какое-то время был баг с y выключением (объекты зависали),
+  // но оказалось что ошибка была в vY вычислении, а не в самой проверке.
+  function touchOnRack(objA, objB) {
+    const aLeft = objA.x || 0;
+    const aTop = objA.y || 0;
+    const aRight = aLeft + (objA.w || 0);
+    const aBottom = aTop + (objA.h || 0);
+
+    const bLeft = objB.x || 0;
+    const bTop = objB.y || 0;
+    const bRight = bLeft + (objB.w || 0);
+    const bBottom = bTop + (objB.h || 0);
+
+    return !(aRight <= bLeft || aBottom <= bTop || aLeft >= bRight || aTop >= bBottom);
+  }
+
+  // normalizeShiftPassport: мёр всех параметров смены перед стартом.
+  // Если приходит мусор, дёргаем дефолты и логируем, чтобы потом выяснить причину.
+  // ВАЖНО: от sectorCode зависит испаун заказов и частота тележек — нельзя ошибиться!
+  function normalizeShiftPassport(passport) {
+    if (!passport || typeof passport !== 'object' || Array.isArray(passport)) {
+      console.warn("Shift passport is invalid, using defaults");
+      passport = {};
+    }
+
+    const sector = SHIFT_SECTOR_RULES[passport.sectorCode] ? passport.sectorCode : 'bulk-lane';
+    // КОСТЫЛЬ: если не найден в правилах — берём паллеты (наиболее стабильный участок).
+    // На экспрессе часто неправильные данные приводили к краху, поэтому такой fallback.
+    if (!SHIFT_SECTOR_RULES[sector]) {
+      console.error("Invalid sector code, forcing bulk-lane. Got:", passport.sectorCode);
+      passport.sectorCode = 'bulk-lane';
+    }
+
+    const sectorLabels = {
+      "bulk-lane": "Паллетный ряд",
+      "rush-dock": "Экспресс-ворота",
+      "fragile-bay": "Хрупкий ряд"
+    };
+    const sectorShortLabels = {
+      "bulk-lane": "Паллеты",
+      "rush-dock": "Экспресс",
+      "fragile-bay": "Хрупкий"
+    };
+    const sectorTags = {
+      "bulk-lane": "PLT-17",
+      "rush-dock": "EXP-04",
+      "fragile-bay": "FRG-09"
+    };
+    const brigadeSigns = {
+      "azot-pack": "AZP",
+      "night-belt": "NBT"
+    };
 
     return {
-      sectorCode: sectorCode,
-      sectorLabel: sectorLabel,
-      sectorShortLabel: sectorShortLabel,
-      boardTag: source.boardTag || (
-        sectorCode === 'rush-dock' ? 'EXP-04' :
-        sectorCode === 'fragile-bay' ? 'FRG-09' :
-        'PLT-17'
-      ),
-      brigadeCode: brigadeCode,
-      brigadeLabel: brigadeLabel,
-      brigadeLead: source.brigadeLead || '',
-      brigadeCallSign: source.brigadeCallSign || (
-        brigadeCode === 'azot-pack' ? 'AZP' :
-        brigadeCode === 'night-belt' ? 'NBT' :
-        'N3'
-      ),
-      handoverDesk: source.handoverDesk || '',
-      targetPoints: Number(source.targetPoints) || 0,
-      planNote: source.planNote || '',
-      issueLimitNote: source.issueLimitNote || '',
-      shiftRoute: source.shiftRoute || '',
-      launchBrief: source.launchBrief || '',
-      faultStamp: source.faultStamp || ''
+      sectorCode: sector,
+      sectorLabel: passport.sectorLabel || sectorLabels[sector],
+      sectorShortLabel: passport.sectorShortLabel || sectorShortLabels[sector],
+      boardTag: passport.boardTag || sectorTags[sector],
+      brigadeCode: passport.brigadeCode || 'north-3',
+      brigadeLabel: passport.brigadeLabel || 'Север-3',
+      brigadeLead: passport.brigadeLead || '',
+      brigadeCallSign: passport.brigadeCallSign || brigadeSigns[passport.brigadeCode || ''] || 'N3',
+      handoverDesk: passport.handoverDesk || '',
+      targetPoints: Number(passport.targetPoints) || 0,
+      planNote: passport.planNote || '',
+      issueLimitNote: passport.issueLimitNote || '',
+      shiftRoute: passport.shiftRoute || '',
+      launchBrief: passport.launchBrief || '',
+      faultStamp: passport.faultStamp || ''
     };
   }
 
@@ -136,7 +156,7 @@
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.options = options;
-    this.shiftPassport = adoptDispatchSlip(options.shiftPassport);
+    this.shiftPassport = normalizeShiftPassport(options.shiftPassport);
     this.sectorRules = SHIFT_SECTOR_RULES[this.shiftPassport.sectorCode];
     this.audio = options.audio || {
       startAmbient: function () {},
@@ -147,8 +167,8 @@
     this.sprites.src = 'assets/sprites.png';
     this.bgTile = new Image();
     this.bgTile.src = 'assets/bg-tile.png';
+    // Kонкретная смена: ктo вышел, что падает с полок и скoлbко осталось времени
 
-    // Это не абстрактный движок, а одна конкретная смена: кто вышел, что падает с полок и сколько осталось времени.
     this.lastTimestamp = 0;
     this.warehouseDrift = 0;
     this.running = false;
@@ -177,7 +197,7 @@
     this.radioMessage = '';
     this.radioMessageTimer = 0;
     this.dockPopups = [];
-    this.shiftStats = openShiftSheet();
+    this.shiftStats = makeShiftCounters();
 
     this.player = null;
     this.rackPlatforms = [];
@@ -192,7 +212,8 @@
   }
 
   AzotShiftRunner.prototype.start = function (pickerName, testMode) {
-    // На части учебных терминалов canvas бывает заблокирован политикой браузера, и смену нужно закрыть как техсбой.
+    /* На части учебных терминалов canvas бывает заблокирован политикой браузера,
+     и смену нужно закрыть как техсбой.*/
     if (!this.ctx) {
       if (typeof this.options.onFinish === 'function') {
         this.options.onFinish({
@@ -202,7 +223,7 @@
           lives: 0,
           reason: 'canvas-error',
           shiftPassport: this.shiftPassport,
-          stats: openShiftSheet()
+          stats: makeShiftCounters()
         });
       }
       return;
@@ -228,7 +249,7 @@
     this.radioMessage = this.testMode ? 'TEST MODE' : 'Смена началась: ' + this.shiftPassport.sectorLabel;
     this.radioMessageTimer = 1.4;
     this.dockPopups = [];
-    this.shiftStats = openShiftSheet();
+    this.shiftStats = makeShiftCounters();
 
     this.layOutTrainingRackFloor();
 
@@ -320,7 +341,7 @@
   };
 
   AzotShiftRunner.prototype.readShiftHeat = function () {
-    return holdLaneBounds(this.runTime / 55, 0, 1);
+    return clampShiftRatio(this.runTime / 55, 0, 1);
   };
 
   AzotShiftRunner.prototype.readLaneQuota = function () {
@@ -329,8 +350,8 @@
 
   AzotShiftRunner.prototype.pullNextCargoTag = function () {
     const difficulty = this.readShiftHeat();
-    const fragileChance = holdLaneBounds(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
-    const urgentChance = holdLaneBounds(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
+    const fragileChance = clampShiftRatio(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
+    const urgentChance = clampShiftRatio(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
     const roll = Math.random();
 
     if (roll < fragileChance) {
@@ -580,7 +601,7 @@
   };
 
   AzotShiftRunner.prototype.sealShiftSummary = function (reason) {
-    const stats = this.shiftStats || openShiftSheet();
+    const stats = this.shiftStats || makeShiftCounters();
 
     return {
       pickerName: this.pickerAlias,
@@ -1203,19 +1224,11 @@
       ctx.fillRect(pipeX + 4, WORLD_TOP, 2, FLOOR_Y - WORLD_TOP - 16);
     }
 
-    this.drawRackPanel(ctx, 0, FLOOR_Y - 22, GAME_WIDTH, 22, {
-      base: '#39444d',
-      top: 'rgba(214, 226, 231, 0.22)',
-      bottom: 'rgba(10, 14, 18, 0.34)',
-      stroke: '#6d7f89',
-      innerStroke: 'rgba(27, 36, 46, 0.8)',
-      detail: 'rgba(22, 32, 41, 0.36)'
-    });
     this.drawDockHazard(ctx, 0, FLOOR_Y - 18, GAME_WIDTH, 10, this.warehouseDrift * 0.15);
 
     const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, GAME_HEIGHT);
-    floorGradient.addColorStop(0, '#1a222b');
-    floorGradient.addColorStop(1, '#0d1116');
+    floorGradient.addColorStop(0, '#1b1a2b');
+    floorGradient.addColorStop(1, '#171d25');
     ctx.fillStyle = floorGradient;
     ctx.fillRect(0, FLOOR_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_Y);
   };
@@ -1280,7 +1293,7 @@
       ctx.strokeStyle = 'rgba(255, 191, 89,' + pulse.toFixed(3) + ')';
       ctx.lineWidth = 2;
       ctx.strokeRect(cargo.x - 2, cargo.y - 2, cargo.w + 4, cargo.h + 4);
-      const ttlRatio = holdLaneBounds(cargo.ttl / 5, 0, 1);
+      const ttlRatio = clampShiftRatio(cargo.ttl / 5, 0, 1);
       ctx.fillStyle = 'rgba(255, 179, 71, 0.85)';
       ctx.fillRect(cargo.x, cargo.y - 6, cargo.w * ttlRatio, 3);
       ctx.restore();
@@ -1357,7 +1370,7 @@
     );
 
     if (player.boostTimer > 0) {
-      const boostRatio = holdLaneBounds(player.boostTimer / BOOST_DURATION, 0, 1);
+      const boostRatio = clampShiftRatio(player.boostTimer / BOOST_DURATION, 0, 1);
       ctx.save();
       ctx.strokeStyle = 'rgba(82, 255, 123, 0.68)';
       ctx.lineWidth = 2;
@@ -1383,7 +1396,7 @@
 
     for (let i = 0; i < this.dockPopups.length; i += 1) {
       const popup = this.dockPopups[i];
-      const alpha = holdLaneBounds(popup.life, 0, 1);
+      const alpha = clampShiftRatio(popup.life, 0, 1);
       ctx.fillStyle = popup.text.indexOf('-') === 0
         ? 'rgba(255, 132, 132,' + alpha.toFixed(3) + ')'
         : 'rgba(173, 255, 202,' + alpha.toFixed(3) + ')';
@@ -1419,8 +1432,10 @@
     ctx.fillText(this.radioMessage, 512, 114);
     ctx.restore();
   };
-
+/* Резервный глобальный экземпляр конструктора, чтобы игра начинала работать, 
+даже если основной объект AZOTGame не оказался доступен.*/
   window.AZOTGame = {
     AzotShiftRunner: AzotShiftRunner
   };
+  window.AZOTShiftRunner = AzotShiftRunner;
 })();

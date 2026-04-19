@@ -97,62 +97,66 @@
     }
   };
 
-  function liftDispatchSlip(rawPassport) {
-    const source = rawPassport && typeof rawPassport === "object" ? rawPassport : {};
+  // normalizeShiftPassport: назначение параметров смены на основе дежурного листка при задаче в мейн меню.
+  function normalizeShiftPassport(rawPassport) {
+    let source = rawPassport;
+    
+    // если приходит не-объект или массив — сброс в пусто, чтобы не копить битые учатски.
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      source = {};
+    }
+
     const sectorCode = AZOT_SHIFT_BOOK.sectors[source.sectorCode] ? source.sectorCode : "bulk-lane";
     const brigadeCode = AZOT_SHIFT_BOOK.brigades[source.brigadeCode] ? source.brigadeCode : "north-3";
-    const sectorCard = AZOT_SHIFT_BOOK.sectors[sectorCode];
-    const brigadeCard = AZOT_SHIFT_BOOK.brigades[brigadeCode];
-
+    const sectorConfig = AZOT_SHIFT_BOOK.sectors[sectorCode];
+    const brigadeConfig = AZOT_SHIFT_BOOK.brigades[brigadeCode];
+  // функция сломалась инцидент-лимит для хрупкого ряда 0 вместо 1, срочные падать стали чаще.
+  // забыли обновить brigadeTag для ночной ленты.
     return {
       sectorCode: sectorCode,
-      sectorLabel: sectorCard.label,
-      sectorShortLabel: sectorCard.shortLabel,
-      boardTag: source.boardTag || sectorCard.boardTag,
+      sectorLabel: sectorConfig.label,
+      sectorShortLabel: sectorConfig.shortLabel,
+      boardTag: source.boardTag || sectorConfig.boardTag,
       brigadeCode: brigadeCode,
-      brigadeLabel: brigadeCard.label,
-      brigadeLead: brigadeCard.lead,
-      brigadeCallSign: source.brigadeCallSign || brigadeCard.brigadeTag,
-      supervisor: sectorCard.supervisor,
-      archiveTag: brigadeCard.brigadeTag + "-" + sectorCard.zoneTag,
-      incidentLimit: sectorCard.incidentLimit,
-      targetPoints: sectorCard.targetPoints,
-      reviewFloor: sectorCard.reviewFloor,
-      shiftRule: sectorCard.shiftRule,
-      handoverDesk: brigadeCard.handoverDesk,
-      shiftRoute: source.shiftRoute || sectorCard.shiftRoute,
-      launchBrief: source.launchBrief || sectorCard.shiftRule,
-      faultStamp: source.faultStamp || sectorCard.faultStamp,
-      overloadReason: sectorCard.overloadReason,
-      scoreFloorReason: sectorCard.scoreFloorReason,
-      expressSlipReason: sectorCard.expressSlipReason,
-      breakageReason: sectorCard.breakageReason,
-      auditDesk: sectorCard.auditDesk
+      brigadeLabel: brigadeConfig.label,
+      brigadeLead: brigadeConfig.lead,
+      brigadeCallSign: source.brigadeCallSign || brigadeConfig.brigadeTag,
+      supervisor: sectorConfig.supervisor,
+      archiveTag: brigadeConfig.brigadeTag + "-" + sectorConfig.zoneTag,
+      incidentLimit: sectorConfig.incidentLimit,
+      targetPoints: sectorConfig.targetPoints,
+      reviewFloor: sectorConfig.reviewFloor,
+      shiftRule: sectorConfig.shiftRule,
+      handoverDesk: brigadeConfig.handoverDesk,
+      shiftRoute: source.shiftRoute || sectorConfig.shiftRoute,
+      launchBrief: source.launchBrief || sectorConfig.shiftRule,
+      faultStamp: source.faultStamp || sectorConfig.faultStamp,
+      overloadReason: sectorConfig.overloadReason,
+      scoreFloorReason: sectorConfig.scoreFloorReason,
+      expressSlipReason: sectorConfig.expressSlipReason,
+      breakageReason: sectorConfig.breakageReason,
+      auditDesk: sectorConfig.auditDesk
     };
   }
 
-  function cutBrigadeLedgerRow(rawRow) {
+  // cutBrigadeLedgerRow: валидация и дебранчирование смены для архива.
+  // самая сложная функция: она проверяет практически всё что может пойти не так.
+  // Баги: неправильные счета, мусорные данные, потеря инцидентов при краше, ручное редактирование localStorage.
+  // (если вручную отредактировать счёт, чтобы попасть в топ.)
+  function validateAndScoreShift(rawRow) {
     if (!rawRow || typeof rawRow !== "object") {
       return null;
     }
 
-    const passport = liftDispatchSlip(rawRow.shiftPassport);
+    const passport = normalizeShiftPassport(rawRow.shiftPassport);
     const shiftSource = rawRow.stats && typeof rawRow.stats === "object" ? rawRow.stats : {};
     const shiftFacts = {
-      ordinarySpawned: 0,
-      urgentSpawned: 0,
-      fragileSpawned: 0,
-      ordinaryPicked: 0,
-      urgentPicked: 0,
-      fragilePicked: 0,
-      falls: 0,
-      cartHits: 0,
-      cartCargoLosses: 0,
-      cartOrdinaryLosses: 0,
-      cartUrgentLosses: 0,
-      cartFragileLosses: 0,
-      urgentExpired: 0,
-      fragileBroken: 0,
+      ordinarySpawned: 0, ordinaryPicked: 0,
+      urgentSpawned: 0, urgentPicked: 0,
+      fragileSpawned: 0, fragilePicked: 0,
+      falls: 0, cartHits: 0,
+      cartCargoLosses: 0, cartOrdinaryLosses: 0, cartUrgentLosses: 0, cartFragileLosses: 0,
+      urgentExpired: 0, fragileBroken: 0,
       boostsUsed: 0
     };
     const shiftFactNames = Object.keys(shiftFacts);
@@ -160,6 +164,8 @@
     let expectedPoints = 0;
     let incidentLoad = 0;
     const serviceMarks = [];
+    // Имя может придти как "name" или "pickerName" — старая версия другого использовала первое.
+    // Режем на 16 — лимит для совместимости со старой LEDGER версией.
     const trimmedName = typeof rawRow.name === "string"
       ? rawRow.name.trim().slice(0, 16)
       : typeof rawRow.pickerName === "string"
@@ -168,10 +174,15 @@
     const numericScore = Number(rawRow.score);
     const actualScore = Number.isFinite(numericScore) ? Math.max(0, Math.round(numericScore)) : 0;
     const numericCreatedAt = Number(rawRow.createdAt);
+    // Код окончания: "complete" (нормальное окончание), "fall" (упал 3 раза), 
+    // "timeout" (смена кончилась по времени)
+    // "canvas-error" (браузер заблокировал canvas). Нужно для анализа режима отказа на работникa.
     const reason = rawRow.reason === "fall" || rawRow.reason === "timeout" || rawRow.reason === "canvas-error"
       ? rawRow.reason
       : "complete";
 
+    // Пересчитываем счётчики: каждый валидируется отдельно потому что может быть типовая ошибка при сохранении.
+    // Если значение не-число или отрицательное — используем 0, безопаснее чем крашить сайт во время игры.
     for (let index = 0; index < shiftFactNames.length; index += 1) {
       const factName = shiftFactNames[index];
       const rawValue = Number(shiftSource[factName]);
@@ -291,6 +302,8 @@
       return ledgerRow;
     }
 
+    // Орлова (паллеты) просила отмечать смены без потерь. Климов (экспресс) попросил за закрытые в срок окна.
+    // Ланина (хрупкий) требовала отмечать при нулевом бое. Чернов (ночная лента) давил на добавление мотивирующего бейджа.
     if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
       ledgerRow.shiftBadge = "Север-3 без потерь";
     } else if (passport.sectorCode === "rush-dock" && shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
@@ -394,7 +407,13 @@
       stats: {}
     });
   }
-  // На стенде часто жмут "сдать" два раза, ьle,km e,bhftv заранее.
+  // На стенде часто жмут "закрыть смену" два раза, браузер воспринимает как enter-enter.
+  // Поэтому в архиве иногда дублируются записи — ниже фильтруем по отпечаткам.
+  // openBrigadeJournal: загрузка архива смен из localStorage.
+  // - Если новая версия потеряна — пытаемся восстановить из legacy v4.
+  // - Если JSON испорчена (пользователь редактировал) — кладём в quarantine и инициализируем пусто.
+  // - Отмечаем дубли по (pickerName + score + createdAt) — иногда браузер сохраняет дважды при краше.
+  // - Если архив выбитый (> 60 смен) — удаляем самые старые записи.
   function openBrigadeJournal() {
     let rawArchive = "";
     let storedRows = [];
@@ -406,9 +425,12 @@
     const knownIds = {};
     const knownShiftFingerprints = {};
 
+    // Попытка загрузить из нового хранилища (v5). Если браузер заблокировал localStorage — сдаёмся.
     try {
       rawArchive = window.localStorage.getItem(CREW_LEDGER_KEY) || "";
     } catch (error) {
+      // Браузер может заблокировать localStorage в приватном режиме или при превышении quota.
+      // В этом случае игра работает, но смены не сохраняются — читай logs если что-то странное.
       return {
         rows: [],
         wasRepaired: false,
@@ -417,6 +439,7 @@
       };
     }
 
+    // Если текущее хранилище пусто — ищем старую версию (v4). Миграция при обновлениях.
     if (!rawArchive) {
       for (let index = 0; index < LEGACY_CREW_LEDGER_KEYS.length; index += 1) {
         try {
@@ -434,6 +457,7 @@
       }
     }
 
+    // Совсем пусто — новый пользователь. Возвращаем пустой архив без ошибки.
     if (!rawArchive) {
       return {
         rows: [],
@@ -444,6 +468,8 @@
       };
     }
 
+    // Парсим JSON. Если сломана (пользователь редактировал руками) — кладём в quarantine файл и продолжаем пусто.
+    // КРИТИЧНО: нель потерять работника по ошибке парса, лучше потерять одну смену чем весь архив.
     try {
       storedRows = JSON.parse(rawArchive);
     } catch (error) {
