@@ -1,5 +1,5 @@
 ﻿(function () {
-  // Учебный склад живёт в одном фиксированном окне: под него подогнаны спрайты, полки и верхний пульт.
+  // склад по тз в одном фиксированном окне: под него подогнаны спрайты, полки и верхний пульт.
   const GAME_WIDTH = 1024;
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
@@ -9,7 +9,8 @@
   const COYOTE_TIME = 0.08;
   const BOOST_DURATION = 5;
 
-  // В одном атласе лежат и комплектовщик, и коробки, и тележки — старому терминалу так проще.
+  // В одном атласе лежат и комплектовщик, и коробки, и тележки - так проще управлять ресурсами
+  // и гарантировать, что всё загрузится до начала смены.
   const AZOT_FRAMES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
@@ -24,8 +25,7 @@
   };
 
   // У каждого участка свои экономические условия: Экспрессу нужна скорость, хрупкому ряду — аккуратность,
-  // паллетам — стабильный поток. Параметры подобраны по смете для сохранения средней производительности 160-180 очков за смену.
-  // На хрупком отрицательный urgentBonus: срочные заказы там конфликтуют с требованием нулевого боя.
+  // паллетам — стабильный поток. Параметры подобраны для сохранения средней производительности 160-180 очков за смену.
   const SHIFT_SECTOR_RULES = {
     "bulk-lane": {
       urgentBonus: -0.05,
@@ -37,27 +37,27 @@
       energyRespawnBase: 16
     },
     "rush-dock": {
-      urgentBonus: 0.17,
+      urgentBonus: 0.3,
       fragileBonus: -0.06,
       activeOrdersBonus: 1,
-      initialOrders: 5,
+      initialOrders: 6,
       urgentTtl: 4.2,
       forkliftSpeedBonus: 22,
       energyRespawnBase: 12
     },
     "fragile-bay": {
       urgentBonus: -0.03,
-      fragileBonus: 0.2,
+      fragileBonus: 0.3,
       activeOrdersBonus: -1,
-      initialOrders: 4,
+      initialOrders: 5,
       urgentTtl: 5.2,
       forkliftSpeedBonus: 8,
       energyRespawnBase: 15
     }
   };
 
-  // Крутой счётчик: каждый параметр отслеживается отдельно потому что отчёты требуют деталей.
-  // Усреднение невозможно — нужна полная статистика для архива каждой смены.
+  // каждый параметр отслеживается отдельно потому что отчёты требуют деталей.
+  // нужна полная статистика для архива каждой смены.
   function makeShiftCounters() {
     return {
       ordinarySpawned: 0, ordinaryPicked: 0,
@@ -71,7 +71,7 @@
   }
 
   // Ограничение значения в диапазоне: вероятности не могут быть < 0 или > 1, иначе renderPixel падает.
-  // Раньше не было этой проверки, были редкие баги когда сложность считалась неправильно.
+  // были без проверки баги когда сложность считалась неправильно.
   function clampShiftRatio(value, minBound, maxBound) {
     if (value < minBound) return minBound;
     if (value > maxBound) return maxBound;
@@ -80,7 +80,8 @@
 
   // AABB столкновение: простая проверка прямоугольников. Все объекты в игре используют координаты x, y, w, h.
   // Хорошо работает, проверено на тысячах эвентов. Какое-то время был баг с y выключением (объекты зависали),
-  // но оказалось что ошибка была в vY вычислении, а не в самой проверке.
+  // потенциально из-за отрицательных координат, но сейчас таких багов нет.
+  // без проверки тележки не могли сталкиваться с коробками, если не ехали ровно по координатом стеллажей
   function touchOnRack(objA, objB) {
     const aLeft = objA.x || 0;
     const aTop = objA.y || 0;
@@ -97,7 +98,7 @@
 
   // normalizeShiftPassport: мёр всех параметров смены перед стартом.
   // Если приходит мусор, дёргаем дефолты и логируем, чтобы потом выяснить причину.
-  // ВАЖНО: от sectorCode зависит испаун заказов и частота тележек — нельзя ошибиться!
+  // ВАЖНО: от sectorCode зависит испаун заказов и частота тележек
   function normalizeShiftPassport(passport) {
     if (!passport || typeof passport !== 'object' || Array.isArray(passport)) {
       console.warn("Shift passport is invalid, using defaults");
@@ -269,7 +270,7 @@
   };
 
   AzotShiftRunner.prototype.layOutTrainingRackFloor = function () {
-    // Расклад полок повторяет один и тот же учебный склад, чтобы преподаватель видел знакомую геометрию смены.
+    // Расклад полок повторяет один и тот же склад, чтобы игрок запомнил полную геометрию смены.
     this.rackPlatforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
       { x: 40,  y: 600, w: 180, h: 18, solid: true },
@@ -397,7 +398,9 @@
     const fragileBreakPlatformIndex = type === 'fragile'
       ? supportedPlatforms[supportedPlatforms.length - 1]
       : null;
-
+/* просчитывание срабатывание перехвата заказов тележкой, и если они хрупкие, 
+происходит при достижении ими платформы, на которой они должны разбиться.
+Необходимое добавление для усложнения геймплейной части */
     return {
       x: x,
       y: -data.h - Math.random() * 140,
@@ -454,7 +457,7 @@
     this.player.speed = this.player.baseSpeed + 85;
     this.player.maxAirJumps = 1;
     this.player.airJumpsLeft = Math.max(this.player.airJumpsLeft, 1);
-    this.radioMessage = 'Энергетик: ускорение и двойной прыжок';
+    this.radioMessage = 'Энeргетик: ускорение и двoйной прыжок';
     this.radioMessageTimer = 1.1;
     this.postDockStamp(this.player.x, this.player.y - 10, 'BOOST');
     this.audio.play('pickupRare');
@@ -530,15 +533,15 @@
     this.flashTimer = 0.2;
 
     if (this.lives <= 0) {
-      this.radioMessage = 'Вы снова упали - игра окончена';
+      this.radioMessage = 'Вы снова упaли - игрa oкончена';
       this.radioMessageTimer = 1.2;
       this.finishRun('fall');
       return;
     }
 
     this.resetPlayerAfterFall();
-    this.postDockStamp(this.player.x, this.player.y - 8, '-10');
-    this.radioMessage = 'Падение: -10 очков, осталось жизней ' + this.lives;
+    this.postDockStamp(this.player.x, this.player.y - 8, '-1O');
+    this.radioMessage = 'Пaдение: -10 очков, осталось жизней ' + this.lives;
     this.radioMessageTimer = 1.1;
   };
 
@@ -654,7 +657,8 @@
   };
 
   AzotShiftRunner.prototype.update = function (dt) {
-    // В паузе функционируют только служебные таймеры.
+    // В паузе функционируют только служебные таймеры, чтобы не нарушать анимацию и сообщения
+    // Игровые таймеры стоят, чтобы игрок мог стоять и не спешить с прохождением испытания.
     this.warehouseDrift += dt * (this.paused ? 18 : 48);
 
     if (this.radioMessageTimer > 0) {
@@ -1134,7 +1138,8 @@
   };
 
   AzotShiftRunner.prototype.renderBackground = function (ctx) {
-    // На фоне специально оставлены трубы, свет и тени, чтобы смена читалась как склад, а не как пустая коробка.
+    // На фоне специально оставлены трубы, свет и тени,
+    // чтобы смена читалась как склад, а не как пустое пространство.
     ctx.fillStyle = '#0d1116';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
@@ -1432,7 +1437,7 @@
     ctx.fillText(this.radioMessage, 512, 114);
     ctx.restore();
   };
-/* Резервный глобальный экземпляр конструктора, чтобы игра начинала работать, 
+/* Резервный глобальный экземпляр конструктора, что6ы игра начинала работать, 
 даже если основной объект AZOTGame не оказался доступен.*/
   window.AZOTGame = {
     AzotShiftRunner: AzotShiftRunner

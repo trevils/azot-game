@@ -27,7 +27,7 @@
         zoneTag: "PLT",
         supervisor: "Мастер Орлова",
         incidentLimit: 3,
-        targetPoints: 160,
+        targetPoints: 400,
         reviewFloor: 90,
         shiftRule: "не просадить паллетный поток",
         shiftRoute: "окно перебора",
@@ -355,6 +355,19 @@
     if (!ledgerRow.planClosed && ledgerRow.reason === "complete" && ledgerRow.score < passport.reviewFloor) {
       ledgerRow.reviewFlag = true;
       ledgerRow.reviewReason = passport.scoreFloorReason || "Участок сдан ниже сменной нормы";
+    }
+
+    if (ledgerRow.testMode) {
+      if (passport.sectorCode === "rush-dock" && shiftFacts.urgentExpired > 40) {
+        ledgerRow.reviewFlag = true;
+        ledgerRow.reviewReason = "Просрочено больше 40 срочных заказов";
+        ledgerRow.planClosed = false;
+      }
+      if (passport.sectorCode === "fragile-bay" && shiftFacts.cartHits > 60) {
+        ledgerRow.reviewFlag = true;
+        ledgerRow.reviewReason = "Тележки сбили больше 60 заказов";
+        ledgerRow.planClosed = false;
+      }
     }
 
     return ledgerRow;
