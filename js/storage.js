@@ -1,10 +1,13 @@
 (function () {
-  const BRIGADE_BOARD_KEY = "azot-brigade-board-v2";
-  const TERMINAL_PREFS_KEY = "azot-terminal-prefs-v2";
-  const DEFAULT_PICKER_ALIAS = "Стажер";
-  const BOARD_LIMIT = 60;
+  const CREW_LEDGER_KEY = "azot-crew-ledger-v5";
+  const DISPATCH_PREFS_KEY = "azot-dispatch-prefs-v5";
+  const BROKEN_LEDGER_SNAPSHOT_KEY = "azot-ledger-quarantine-v2";
+  const LEGACY_CREW_LEDGER_KEYS = ["azot-crew-ledger-v4"];
+  const LEGACY_DISPATCH_PREFS_KEYS = ["azot-dispatch-prefs-v4"];
+  const ARCHIVE_LIMIT = 60;
+  const RESERVE_PICKER_NAME = "Стажер";
 
-  const SHIFT_SCORE_RULES = {
+  const WAREHOUSE_RATE_CARD = {
     ordinaryPicked: 10,
     urgentPicked: 20,
     fragilePicked: 30,
@@ -15,99 +18,127 @@
     cartFragileLosses: -15
   };
 
-  // Эти справочники нужны и для настроек, и для журнала смен.
-  const DISPATCH_PASSPORT = {
+  const AZOT_SHIFT_BOOK = {
     sectors: {
-      "bulk-lane": { label: "Паллетный ряд", shortLabel: "Паллеты" },
-      "rush-dock": { label: "Экспресс-ворота", shortLabel: "Экспресс" },
-      "fragile-bay": { label: "Хрупкий ряд", shortLabel: "Хрупкий" }
+      "bulk-lane": {
+        label: "Паллетный ряд",
+        shortLabel: "Паллеты",
+        boardTag: "PLT-17",
+        zoneTag: "PLT",
+        supervisor: "Мастер Орлова",
+        incidentLimit: 3,
+        targetPoints: 160,
+        reviewFloor: 90,
+        shiftRule: "не просадить паллетный поток",
+        shiftRoute: "окно перебора",
+        overloadReason: "Паллетный ряд ушел в пересорт",
+        scoreFloorReason: "Паллетный поток сдан ниже сменной нормы",
+        expressSlipReason: "",
+        breakageReason: "",
+        faultStamp: "Паллетная линия не подняла смену",
+        auditDesk: "пульт Орловой"
+      },
+      "rush-dock": {
+        label: "Экспресс-ворота",
+        shortLabel: "Экспресс",
+        boardTag: "EXP-04",
+        zoneTag: "EXP",
+        supervisor: "Диспетчер Климов",
+        incidentLimit: 1,
+        targetPoints: 180,
+        reviewFloor: 110,
+        shiftRule: "не сорвать срочные окна",
+        shiftRoute: "стол Климова",
+        overloadReason: "Экспресс-ворота сорвали окно отгрузки",
+        scoreFloorReason: "Экспресс-поток закрыт ниже сменной нормы",
+        expressSlipReason: "На воротах сорвано срочное окно",
+        breakageReason: "",
+        faultStamp: "Экспресс-ворота потеряли пульт смены",
+        auditDesk: "экспресс-пульт Климова"
+      },
+      "fragile-bay": {
+        label: "Хрупкий ряд",
+        shortLabel: "Хрупкий",
+        boardTag: "FRG-09",
+        zoneTag: "FRG",
+        supervisor: "Контролер Ланина",
+        incidentLimit: 0,
+        targetPoints: 150,
+        reviewFloor: 85,
+        shiftRule: "сдать хрупкий товар без боя",
+        shiftRoute: "контрольный стол Ланиной",
+        overloadReason: "Хрупкий ряд дал брак и возвраты",
+        scoreFloorReason: "Хрупкий ряд закрыт ниже планки безбрака",
+        expressSlipReason: "",
+        breakageReason: "На хрупком ряду зафиксирован бой",
+        faultStamp: "Хрупкий ряд остался без игрового поля",
+        auditDesk: "стол Ланиной"
+      }
     },
     brigades: {
-      "north-3": { label: "Север-3" },
-      "azot-pack": { label: "Азот-комплект" },
-      "night-belt": { label: "Ночная лента" }
+      "north-3": {
+        label: "Север-3",
+        brigadeTag: "N3",
+        lead: "Романов",
+        handoverDesk: "окно А2"
+      },
+      "azot-pack": {
+        label: "Азот-комплект",
+        brigadeTag: "AZP",
+        lead: "Ведерникова",
+        handoverDesk: "окно Б1"
+      },
+      "night-belt": {
+        label: "Ночная лента",
+        brigadeTag: "NBT",
+        lead: "Чернов",
+        handoverDesk: "ночной пост"
+      }
     }
   };
 
-  function readJson(key, fallbackValue) {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) {
-        return fallbackValue;
-      }
-
-      return JSON.parse(raw);
-    } catch (error) {
-      return fallbackValue;
-    }
-  }
-
-  function writeJson(key, value) {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function normalizeCounter(value) {
-    const number = Number(value);
-
-    if (!Number.isFinite(number) || number < 0) {
-      return 0;
-    }
-
-    return Math.floor(number);
-  }
-
-  function normalizeScore(value) {
-    const number = Number(value);
-
-    if (!Number.isFinite(number)) {
-      return 0;
-    }
-
-    return Math.max(0, Math.round(number));
-  }
-
-  function normalizePickerName(name) {
-    if (typeof name !== "string") {
-      return DEFAULT_PICKER_ALIAS;
-    }
-
-    const trimmed = name.trim().slice(0, 16);
-    return trimmed || DEFAULT_PICKER_ALIAS;
-  }
-
-  function normalizeReason(reason) {
-    if (reason === "fall" || reason === "timeout" || reason === "canvas-error") {
-      return reason;
-    }
-
-    return "complete";
-  }
-
-  function normalizeShiftPassport(passport) {
-    const source = passport && typeof passport === "object" ? passport : {};
-    const sectorCode = DISPATCH_PASSPORT.sectors[source.sectorCode] ? source.sectorCode : "bulk-lane";
-    const brigadeCode = DISPATCH_PASSPORT.brigades[source.brigadeCode] ? source.brigadeCode : "north-3";
+  function liftDispatchSlip(rawPassport) {
+    const source = rawPassport && typeof rawPassport === "object" ? rawPassport : {};
+    const sectorCode = AZOT_SHIFT_BOOK.sectors[source.sectorCode] ? source.sectorCode : "bulk-lane";
+    const brigadeCode = AZOT_SHIFT_BOOK.brigades[source.brigadeCode] ? source.brigadeCode : "north-3";
+    const sectorCard = AZOT_SHIFT_BOOK.sectors[sectorCode];
+    const brigadeCard = AZOT_SHIFT_BOOK.brigades[brigadeCode];
 
     return {
       sectorCode: sectorCode,
-      sectorLabel: DISPATCH_PASSPORT.sectors[sectorCode].label,
-      sectorShortLabel: DISPATCH_PASSPORT.sectors[sectorCode].shortLabel,
+      sectorLabel: sectorCard.label,
+      sectorShortLabel: sectorCard.shortLabel,
+      boardTag: source.boardTag || sectorCard.boardTag,
       brigadeCode: brigadeCode,
-      brigadeLabel: DISPATCH_PASSPORT.brigades[brigadeCode].label
+      brigadeLabel: brigadeCard.label,
+      brigadeLead: brigadeCard.lead,
+      brigadeCallSign: source.brigadeCallSign || brigadeCard.brigadeTag,
+      supervisor: sectorCard.supervisor,
+      archiveTag: brigadeCard.brigadeTag + "-" + sectorCard.zoneTag,
+      incidentLimit: sectorCard.incidentLimit,
+      targetPoints: sectorCard.targetPoints,
+      reviewFloor: sectorCard.reviewFloor,
+      shiftRule: sectorCard.shiftRule,
+      handoverDesk: brigadeCard.handoverDesk,
+      shiftRoute: source.shiftRoute || sectorCard.shiftRoute,
+      launchBrief: source.launchBrief || sectorCard.shiftRule,
+      faultStamp: source.faultStamp || sectorCard.faultStamp,
+      overloadReason: sectorCard.overloadReason,
+      scoreFloorReason: sectorCard.scoreFloorReason,
+      expressSlipReason: sectorCard.expressSlipReason,
+      breakageReason: sectorCard.breakageReason,
+      auditDesk: sectorCard.auditDesk
     };
   }
 
-  function createEmptyShiftStats() {
-    return {
+  function cutBrigadeLedgerRow(rawRow) {
+    if (!rawRow || typeof rawRow !== "object") {
+      return null;
+    }
+
+    const passport = liftDispatchSlip(rawRow.shiftPassport);
+    const shiftSource = rawRow.stats && typeof rawRow.stats === "object" ? rawRow.stats : {};
+    const shiftFacts = {
       ordinarySpawned: 0,
       urgentSpawned: 0,
       fragileSpawned: 0,
@@ -124,372 +155,640 @@
       fragileBroken: 0,
       boostsUsed: 0
     };
-  }
+    const shiftFactNames = Object.keys(shiftFacts);
+    let hasServiceStats = false;
+    let expectedPoints = 0;
+    let incidentLoad = 0;
+    const serviceMarks = [];
+    const trimmedName = typeof rawRow.name === "string"
+      ? rawRow.name.trim().slice(0, 16)
+      : typeof rawRow.pickerName === "string"
+        ? rawRow.pickerName.trim().slice(0, 16)
+        : "";
+    const numericScore = Number(rawRow.score);
+    const actualScore = Number.isFinite(numericScore) ? Math.max(0, Math.round(numericScore)) : 0;
+    const numericCreatedAt = Number(rawRow.createdAt);
+    const reason = rawRow.reason === "fall" || rawRow.reason === "timeout" || rawRow.reason === "canvas-error"
+      ? rawRow.reason
+      : "complete";
 
-  function normalizeShiftStats(stats) {
-    const source = stats && typeof stats === "object" ? stats : {};
+    for (let index = 0; index < shiftFactNames.length; index += 1) {
+      const factName = shiftFactNames[index];
+      const rawValue = Number(shiftSource[factName]);
+      const preparedValue = Number.isFinite(rawValue) && rawValue > 0 ? Math.floor(rawValue) : 0;
+      shiftFacts[factName] = preparedValue;
 
-    return {
-      ordinarySpawned: normalizeCounter(source.ordinarySpawned),
-      urgentSpawned: normalizeCounter(source.urgentSpawned),
-      fragileSpawned: normalizeCounter(source.fragileSpawned),
-      ordinaryPicked: normalizeCounter(source.ordinaryPicked),
-      urgentPicked: normalizeCounter(source.urgentPicked),
-      fragilePicked: normalizeCounter(source.fragilePicked),
-      falls: normalizeCounter(source.falls),
-      cartHits: normalizeCounter(source.cartHits),
-      cartCargoLosses: normalizeCounter(source.cartCargoLosses),
-      cartOrdinaryLosses: normalizeCounter(source.cartOrdinaryLosses),
-      cartUrgentLosses: normalizeCounter(source.cartUrgentLosses),
-      cartFragileLosses: normalizeCounter(source.cartFragileLosses),
-      urgentExpired: normalizeCounter(source.urgentExpired),
-      fragileBroken: normalizeCounter(source.fragileBroken),
-      boostsUsed: normalizeCounter(source.boostsUsed)
+      if (preparedValue > 0) {
+        hasServiceStats = true;
+      }
+    }
+
+    expectedPoints += shiftFacts.ordinaryPicked * WAREHOUSE_RATE_CARD.ordinaryPicked;
+    expectedPoints += shiftFacts.urgentPicked * WAREHOUSE_RATE_CARD.urgentPicked;
+    expectedPoints += shiftFacts.fragilePicked * WAREHOUSE_RATE_CARD.fragilePicked;
+    expectedPoints += shiftFacts.falls * WAREHOUSE_RATE_CARD.falls;
+    expectedPoints += shiftFacts.cartHits * WAREHOUSE_RATE_CARD.cartHits;
+    expectedPoints += shiftFacts.cartOrdinaryLosses * WAREHOUSE_RATE_CARD.cartOrdinaryLosses;
+    expectedPoints += shiftFacts.cartUrgentLosses * WAREHOUSE_RATE_CARD.cartUrgentLosses;
+    expectedPoints += shiftFacts.cartFragileLosses * WAREHOUSE_RATE_CARD.cartFragileLosses;
+
+    incidentLoad =
+      shiftFacts.falls +
+      shiftFacts.cartHits +
+      shiftFacts.cartCargoLosses +
+      shiftFacts.urgentExpired +
+      shiftFacts.fragileBroken;
+
+    if (passport.sectorCode === "bulk-lane") {
+      if (shiftFacts.ordinaryPicked >= 10 && shiftFacts.cartOrdinaryLosses === 0) {
+        expectedPoints += 12;
+        serviceMarks.push("паллетный план удержан");
+      }
+      if (shiftFacts.cartCargoLosses >= 3) {
+        expectedPoints -= 10;
+        serviceMarks.push("паллетный ряд дал пересорт");
+      }
+    }
+
+    if (passport.sectorCode === "rush-dock") {
+      if (shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
+        expectedPoints += 15;
+        serviceMarks.push("экспресс-окно закрыто без срыва");
+      }
+      if (shiftFacts.urgentExpired > 0) {
+        expectedPoints -= shiftFacts.urgentExpired * 12;
+        serviceMarks.push("на воротах была просрочка");
+      }
+    }
+
+    if (passport.sectorCode === "fragile-bay") {
+      if (shiftFacts.fragilePicked >= 3 && shiftFacts.fragileBroken === 0 && shiftFacts.cartFragileLosses === 0) {
+        expectedPoints += 20;
+        serviceMarks.push("хрупкий ряд сдан без боя");
+      }
+      if (shiftFacts.fragileBroken + shiftFacts.cartFragileLosses > 0) {
+        expectedPoints -= 20;
+        serviceMarks.push("по хрупкому прошел брак");
+      }
+    }
+
+    if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
+      expectedPoints += 6;
+      serviceMarks.push("Север-3 отработал без травм");
+    }
+
+    if (passport.brigadeCode === "azot-pack" && shiftFacts.ordinaryPicked + shiftFacts.fragilePicked >= 8 && shiftFacts.cartCargoLosses === 0) {
+      expectedPoints += 10;
+      serviceMarks.push("Азот-комплект закрыл плотную отгрузку");
+    }
+
+    if (passport.brigadeCode === "night-belt" && shiftFacts.boostsUsed >= 2 && shiftFacts.falls === 0) {
+      expectedPoints += 8;
+      serviceMarks.push("ночная лента держала темп");
+    }
+
+    if (incidentLoad > passport.incidentLimit) {
+      expectedPoints -= (incidentLoad - passport.incidentLimit) * 5;
+    }
+
+    if (reason === "canvas-error") {
+      expectedPoints = 0;
+    }
+
+    expectedPoints = Math.max(0, Math.round(expectedPoints));
+
+    const ledgerRow = {
+      entryId: typeof rawRow.entryId === "string" && rawRow.entryId.trim()
+        ? rawRow.entryId
+        : "shift-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+      name: trimmedName || RESERVE_PICKER_NAME,
+      score: actualScore,
+      createdAt: Number.isFinite(numericCreatedAt) && numericCreatedAt > 0 ? Math.floor(numericCreatedAt) : Date.now(),
+      reason: reason,
+      lives: Number.isFinite(Number(rawRow.lives)) && Number(rawRow.lives) > 0 ? Math.floor(Number(rawRow.lives)) : 0,
+      testMode: !!rawRow.testMode,
+      shiftPassport: passport,
+      stats: shiftFacts,
+      incidentLoad: incidentLoad,
+      shiftBadge: "Дежурный комплектовщик",
+      serviceNote: serviceMarks.join("; "),
+      scoreCheck: hasServiceStats
+        ? (actualScore === expectedPoints ? "ok" : Math.abs(actualScore - expectedPoints) <= 5 ? "minor-drift" : "needs-hand-check")
+        : "legacy-row",
+      expectedPoints: hasServiceStats ? expectedPoints : actualScore,
+      reviewFlag: false,
+      reviewReason: "",
+      shiftBoss: passport.supervisor,
+      auditDesk: passport.auditDesk,
+      archiveTag: passport.archiveTag,
+      planClosed: actualScore >= passport.targetPoints
     };
+
+    if (ledgerRow.reason === "canvas-error") {
+      ledgerRow.shiftBadge = "Сбой терминала";
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = "Терминал не открыл игровое поле";
+      return ledgerRow;
+    }
+
+    if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
+      ledgerRow.shiftBadge = "Север-3 без потерь";
+    } else if (passport.sectorCode === "rush-dock" && shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
+      ledgerRow.shiftBadge = "Экспресс закрыт в срок";
+    } else if (passport.sectorCode === "fragile-bay" && shiftFacts.fragilePicked >= 3 && shiftFacts.fragileBroken === 0 && shiftFacts.cartFragileLosses === 0) {
+      ledgerRow.shiftBadge = "Ряд хрупкого под контролем";
+    } else if (passport.sectorCode === "bulk-lane" && shiftFacts.ordinaryPicked >= 8 && shiftFacts.cartCargoLosses <= 1) {
+      ledgerRow.shiftBadge = "Паллетный мотор";
+    } else if (passport.brigadeCode === "night-belt" && shiftFacts.boostsUsed >= 2) {
+      ledgerRow.shiftBadge = "Ночная лента держит темп";
+    } else if (passport.brigadeCode === "azot-pack" && shiftFacts.fragilePicked >= 2 && shiftFacts.cartFragileLosses === 0) {
+      ledgerRow.shiftBadge = "Азот-комплект без боя";
+    } else if (shiftFacts.falls >= 3) {
+      ledgerRow.shiftBadge = "Нарушение ТБ";
+    } else if (shiftFacts.cartCargoLosses >= 3) {
+      ledgerRow.shiftBadge = "Сложный маршрут";
+    }
+
+    if (ledgerRow.scoreCheck === "needs-hand-check") {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = "Очки не сошлись со служебной статистикой";
+      return ledgerRow;
+    }
+
+    if (passport.sectorCode === "rush-dock" && shiftFacts.urgentExpired > 0) {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = passport.expressSlipReason || "Срыв экспресс-окна на воротах";
+      return ledgerRow;
+    }
+
+    if (passport.sectorCode === "fragile-bay" && shiftFacts.fragileBroken + shiftFacts.cartFragileLosses > 0) {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = passport.breakageReason || "Бой хрупкого товара на участке";
+      return ledgerRow;
+    }
+
+    if (shiftFacts.falls >= 3) {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = "Повторные нарушения ТБ за смену";
+      return ledgerRow;
+    }
+
+    if (incidentLoad > passport.incidentLimit) {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = passport.overloadReason || "Потери участка выше нормы";
+      return ledgerRow;
+    }
+
+    if (!ledgerRow.planClosed && ledgerRow.reason === "complete" && ledgerRow.score < passport.reviewFloor) {
+      ledgerRow.reviewFlag = true;
+      ledgerRow.reviewReason = passport.scoreFloorReason || "Участок сдан ниже сменной нормы";
+    }
+
+    return ledgerRow;
   }
 
-  function hasDetailedShiftStats(stats) {
-    return Object.keys(stats).some(function (key) {
-      return stats[key] > 0;
-    });
+  function sortBrigadeLedger(leftRow, rightRow) {
+    if (leftRow.score !== rightRow.score) {
+      return rightRow.score - leftRow.score;
+    }
+
+    if (leftRow.reviewFlag !== rightRow.reviewFlag) {
+      return leftRow.reviewFlag ? 1 : -1;
+    }
+
+    if (leftRow.incidentLoad !== rightRow.incidentLoad) {
+      return leftRow.incidentLoad - rightRow.incidentLoad;
+    }
+
+    if (leftRow.stats.urgentPicked !== rightRow.stats.urgentPicked) {
+      return rightRow.stats.urgentPicked - leftRow.stats.urgentPicked;
+    }
+
+    return leftRow.createdAt - rightRow.createdAt;
   }
 
-  function recountShiftScore(stats) {
-    let total = 0;
-
-    total += stats.ordinaryPicked * SHIFT_SCORE_RULES.ordinaryPicked;
-    total += stats.urgentPicked * SHIFT_SCORE_RULES.urgentPicked;
-    total += stats.fragilePicked * SHIFT_SCORE_RULES.fragilePicked;
-    total += stats.falls * SHIFT_SCORE_RULES.falls;
-    total += stats.cartHits * SHIFT_SCORE_RULES.cartHits;
-    total += stats.cartOrdinaryLosses * SHIFT_SCORE_RULES.cartOrdinaryLosses;
-    total += stats.cartUrgentLosses * SHIFT_SCORE_RULES.cartUrgentLosses;
-    total += stats.cartFragileLosses * SHIFT_SCORE_RULES.cartFragileLosses;
-
-    return Math.max(0, total);
-  }
-
-  function createEntryId() {
-    return "shift-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-  }
-
-  function buildShiftBadge(entry) {
-    const stats = entry.stats;
-    const passport = entry.shiftPassport;
-
-    if (entry.reason === "canvas-error") {
-      return "Сбой терминала";
+  function sealShiftHandover(summaryOrName, maybeScore) {
+    if (summaryOrName && typeof summaryOrName === "object") {
+      return cutBrigadeLedgerRow({
+        entryId: "",
+        name: summaryOrName.pickerName,
+        score: summaryOrName.score,
+        createdAt: Date.now(),
+        reason: summaryOrName.reason,
+        lives: summaryOrName.lives,
+        testMode: !!summaryOrName.testMode,
+        shiftPassport: summaryOrName.shiftPassport,
+        stats: summaryOrName.stats
+      });
     }
 
-    if (entry.reason === "fall" && stats.falls >= 3) {
-      return "Нарушение ТБ";
-    }
-
-    if (passport.sectorCode === "rush-dock" && stats.urgentPicked >= 4 && stats.urgentExpired === 0) {
-      return "Диспетчер экспресс-ворот";
-    }
-
-    if (passport.sectorCode === "fragile-bay" && stats.fragilePicked >= 3 && stats.fragileBroken === 0 && stats.cartFragileLosses === 0) {
-      return "Смотритель хрупкого ряда";
-    }
-
-    if (passport.sectorCode === "bulk-lane" && stats.ordinaryPicked >= 8 && stats.cartCargoLosses <= 1) {
-      return "Паллетный мотор";
-    }
-
-    if (stats.urgentPicked >= 4 && stats.urgentExpired === 0) {
-      return "Охотник за срочкой";
-    }
-
-    if (stats.fragilePicked >= 3 && stats.fragileBroken === 0 && stats.cartFragileLosses === 0) {
-      return "Аккуратный сборщик";
-    }
-
-    if (stats.falls === 0 && stats.cartHits === 0) {
-      return "Смена без травм";
-    }
-
-    if (stats.boostsUsed >= 3) {
-      return "Спринтер склада";
-    }
-
-    if (stats.cartCargoLosses >= 3) {
-      return "Сложный маршрут";
-    }
-
-    return "Дежурный комплектовщик";
-  }
-
-  function countShiftIncidents(stats) {
-    return stats.falls + stats.cartHits + stats.cartCargoLosses + stats.urgentExpired + stats.fragileBroken;
-  }
-
-  function compareBoardEntries(leftEntry, rightEntry) {
-    if (leftEntry.score !== rightEntry.score) {
-      return rightEntry.score - leftEntry.score;
-    }
-
-    const incidentGap = countShiftIncidents(leftEntry.stats) - countShiftIncidents(rightEntry.stats);
-    if (incidentGap !== 0) {
-      return incidentGap;
-    }
-
-    if (leftEntry.stats.urgentPicked !== rightEntry.stats.urgentPicked) {
-      return rightEntry.stats.urgentPicked - leftEntry.stats.urgentPicked;
-    }
-
-    if (leftEntry.stats.fragilePicked !== rightEntry.stats.fragilePicked) {
-      return rightEntry.stats.fragilePicked - leftEntry.stats.fragilePicked;
-    }
-
-    return leftEntry.createdAt - rightEntry.createdAt;
-  }
-
-  function finalizeBoardEntry(entry) {
-    const normalizedStats = normalizeShiftStats(entry.stats);
-    const expectedScore = hasDetailedShiftStats(normalizedStats)
-      ? recountShiftScore(normalizedStats)
-      : normalizeScore(entry.score);
-    const scoreAudit = hasDetailedShiftStats(normalizedStats)
-      ? (normalizeScore(entry.score) === expectedScore ? "ok" : "mismatch")
-      : "legacy";
-
-    return {
-      entryId: entry.entryId || createEntryId(),
-      name: normalizePickerName(entry.name),
-      score: normalizeScore(entry.score),
-      createdAt: normalizeCounter(entry.createdAt) || Date.now(),
-      reason: normalizeReason(entry.reason),
-      lives: normalizeCounter(entry.lives),
-      testMode: !!entry.testMode,
-      shiftPassport: normalizeShiftPassport(entry.shiftPassport),
-      stats: normalizedStats,
-      badge: "",
-      scoreAudit: scoreAudit,
-      expectedScore: expectedScore
-    };
-  }
-
-  function normalizeBoardEntry(rawEntry) {
-    if (!rawEntry || typeof rawEntry !== "object") {
-      return null;
-    }
-
-    const entry = finalizeBoardEntry({
-      entryId: typeof rawEntry.entryId === "string" ? rawEntry.entryId : "",
-      name: rawEntry.name || rawEntry.pickerName,
-      score: rawEntry.score,
-      createdAt: rawEntry.createdAt,
-      reason: rawEntry.reason,
-      lives: rawEntry.lives,
-      testMode: rawEntry.testMode,
-      shiftPassport: rawEntry.shiftPassport,
-      stats: rawEntry.stats
-    });
-
-    entry.badge = buildShiftBadge(entry);
-
-    return entry;
-  }
-
-  function buildLegacyShiftEntry(name, score) {
-    const stats = createEmptyShiftStats();
-    const entry = finalizeBoardEntry({
-      entryId: createEntryId(),
-      name: name,
-      score: score,
+    return cutBrigadeLedgerRow({
+      entryId: "",
+      name: summaryOrName,
+      score: maybeScore,
       createdAt: Date.now(),
       reason: "complete",
       lives: 0,
       testMode: false,
-      shiftPassport: normalizeShiftPassport(null),
-      stats: stats
+      shiftPassport: null,
+      stats: {}
     });
-
-    entry.badge = buildShiftBadge(entry);
-    return entry;
   }
+  // На стенде часто жмут "сдать" два раза, ьle,km e,bhftv заранее.
+  function openBrigadeJournal() {
+    let rawArchive = "";
+    let storedRows = [];
+    let rows = [];
+    let wasRepaired = false;
+    let removedRows = 0;
+    let archiveIssue = "";
+    let sourceKey = CREW_LEDGER_KEY;
+    const knownIds = {};
+    const knownShiftFingerprints = {};
 
-  function buildShiftEntryFromSummary(summary) {
-    const source = summary && typeof summary === "object" ? summary : {};
-    const stats = normalizeShiftStats(source.stats);
-    const entry = finalizeBoardEntry({
-      entryId: createEntryId(),
-      name: source.pickerName,
-      score: source.score,
-      createdAt: Date.now(),
-      reason: source.reason,
-      lives: source.lives,
-      testMode: !!source.testMode,
-      shiftPassport: source.shiftPassport,
-      stats: stats
-    });
-
-    entry.badge = buildShiftBadge(entry);
-    return entry;
-  }
-
-  function readBoardState() {
-    const storedBoard = readJson(BRIGADE_BOARD_KEY, []);
-    let repaired = !Array.isArray(storedBoard);
-    let droppedRecords = 0;
-    let board = [];
-
-    if (!Array.isArray(storedBoard)) {
+    try {
+      rawArchive = window.localStorage.getItem(CREW_LEDGER_KEY) || "";
+    } catch (error) {
       return {
-        entries: [],
-        repaired: true,
-        droppedRecords: 0
+        rows: [],
+        wasRepaired: false,
+        removedRows: 0,
+        archiveIssue: "browser-blocked-ledger"
       };
     }
 
-    // Старые и битые записи приводим к одному формату.
-    for (let index = 0; index < storedBoard.length; index += 1) {
-      const entry = normalizeBoardEntry(storedBoard[index]);
+    if (!rawArchive) {
+      for (let index = 0; index < LEGACY_CREW_LEDGER_KEYS.length; index += 1) {
+        try {
+          rawArchive = window.localStorage.getItem(LEGACY_CREW_LEDGER_KEYS[index]) || "";
+        } catch (error) {
+          rawArchive = "";
+        }
 
-      if (!entry) {
-        droppedRecords += 1;
-        repaired = true;
+        if (rawArchive) {
+          sourceKey = LEGACY_CREW_LEDGER_KEYS[index];
+          archiveIssue = "legacy-ledger-migrated";
+          wasRepaired = true;
+          break;
+        }
+      }
+    }
+
+    if (!rawArchive) {
+      return {
+        rows: [],
+        wasRepaired: false,
+        removedRows: 0,
+        archiveIssue: "",
+        sourceKey: sourceKey
+      };
+    }
+
+    try {
+      storedRows = JSON.parse(rawArchive);
+    } catch (error) {
+      archiveIssue = "ledger-quarantined";
+      wasRepaired = true;
+
+      try {
+        window.localStorage.setItem(BROKEN_LEDGER_SNAPSHOT_KEY, rawArchive.slice(0, 12000));
+      } catch (quarantineError) {}
+
+      try {
+        window.localStorage.removeItem(CREW_LEDGER_KEY);
+      } catch (cleanupError) {}
+
+      return {
+        rows: [],
+        wasRepaired: true,
+        removedRows: 0,
+        archiveIssue: archiveIssue,
+        sourceKey: sourceKey
+      };
+    }
+
+    if (!Array.isArray(storedRows)) {
+      archiveIssue = "ledger-reset-from-object";
+      wasRepaired = true;
+
+      try {
+        window.localStorage.removeItem(CREW_LEDGER_KEY);
+      } catch (cleanupError) {}
+
+      return {
+        rows: [],
+        wasRepaired: true,
+        removedRows: 0,
+        archiveIssue: archiveIssue,
+        sourceKey: sourceKey
+      };
+    }
+
+    for (let index = 0; index < storedRows.length; index += 1) {
+      const ledgerRow = cutBrigadeLedgerRow(storedRows[index]);
+
+      if (!ledgerRow) {
+        removedRows += 1;
+        wasRepaired = true;
         continue;
       }
 
-      if (entry.badge !== storedBoard[index].badge || entry.scoreAudit !== storedBoard[index].scoreAudit) {
-        repaired = true;
+      if (knownIds[ledgerRow.entryId]) {
+        ledgerRow.entryId = ledgerRow.entryId + "-" + (index + 1);
+        wasRepaired = true;
       }
 
-      board.push(entry);
+      const fingerprint =
+        ledgerRow.name + "|" +
+        ledgerRow.archiveTag + "|" +
+        ledgerRow.score + "|" +
+        Math.floor(ledgerRow.createdAt / 60000);
+
+      if (knownShiftFingerprints[fingerprint]) {
+        removedRows += 1;
+        wasRepaired = true;
+        archiveIssue = archiveIssue || "double-handover-pruned";
+        continue;
+      }
+
+      knownIds[ledgerRow.entryId] = true;
+      knownShiftFingerprints[fingerprint] = true;
+
+      if (
+        storedRows[index].shiftBadge !== ledgerRow.shiftBadge ||
+        storedRows[index].reviewReason !== ledgerRow.reviewReason ||
+        storedRows[index].scoreCheck !== ledgerRow.scoreCheck ||
+        storedRows[index].serviceNote !== ledgerRow.serviceNote
+      ) {
+        wasRepaired = true;
+      }
+
+      rows.push(ledgerRow);
     }
 
-    board.sort(compareBoardEntries);
+    rows.sort(sortBrigadeLedger);
 
-    if (board.length > BOARD_LIMIT) {
-      droppedRecords += board.length - BOARD_LIMIT;
-      board = board.slice(0, BOARD_LIMIT);
-      repaired = true;
-    }
-
-    return {
-      entries: board,
-      repaired: repaired,
-      droppedRecords: droppedRecords
-    };
-  }
-
-  function persistBoard(entries) {
-    const fullBoard = entries.slice(0, BOARD_LIMIT);
-
-    if (writeJson(BRIGADE_BOARD_KEY, fullBoard)) {
-      return {
-        saved: true,
-        storageMode: "full",
-        persistedEntries: fullBoard,
-        droppedByStorage: 0
-      };
-    }
-
-    const trimmedBoard = fullBoard.slice(0, 40);
-    if (writeJson(BRIGADE_BOARD_KEY, trimmedBoard)) {
-      return {
-        saved: true,
-        storageMode: "trimmed",
-        persistedEntries: trimmedBoard,
-        droppedByStorage: fullBoard.length - trimmedBoard.length
-      };
-    }
-
-    const emergencyBoard = fullBoard.slice(0, 10);
-    if (writeJson(BRIGADE_BOARD_KEY, emergencyBoard)) {
-      return {
-        saved: true,
-        storageMode: "emergency-top10",
-        persistedEntries: emergencyBoard,
-        droppedByStorage: fullBoard.length - emergencyBoard.length
-      };
+    if (rows.length > ARCHIVE_LIMIT) {
+      removedRows += rows.length - ARCHIVE_LIMIT;
+      rows = rows.slice(0, ARCHIVE_LIMIT);
+      wasRepaired = true;
     }
 
     return {
-      saved: false,
-      storageMode: "memory-only",
-      persistedEntries: fullBoard,
-      droppedByStorage: 0
+      rows: rows,
+      wasRepaired: wasRepaired,
+      removedRows: removedRows,
+      archiveIssue: archiveIssue,
+      sourceKey: sourceKey
+    };
+  }
+//расширено хранилище, миграция prefs.journal, нормализация и восстановление данных
+  function stashBrigadeJournal(rows) {
+    const fullRows = rows.slice(0, ARCHIVE_LIMIT);
+
+    try {
+      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(fullRows));
+      return {
+        archiveSaved: true,
+        archiveMode: "full-archive",
+        persistedRows: fullRows,
+        rowsSkipped: 0,
+        archiveIssue: ""
+      };
+    } catch (error) {}
+
+    // Если квота будет предельной, урезаем архив, не теряем служебные причины и разметки.
+    const compactRows = fullRows.slice(0, 40).map(function (row) {
+      return {
+        entryId: row.entryId,
+        name: row.name,
+        score: row.score,
+        createdAt: row.createdAt,
+        reason: row.reason,
+        shiftPassport: {
+          sectorCode: row.shiftPassport.sectorCode,
+          brigadeCode: row.shiftPassport.brigadeCode
+        },
+        stats: row.stats,
+        shiftBadge: row.shiftBadge,
+        serviceNote: row.serviceNote,
+        reviewReason: row.reviewReason,
+        scoreCheck: row.scoreCheck,
+        shiftBoss: row.shiftBoss
+      };
+    });
+
+    try {
+      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(compactRows));
+      return {
+        archiveSaved: true,
+        archiveMode: "trimmed-archive",
+        persistedRows: fullRows.slice(0, 40),
+        rowsSkipped: fullRows.length - 40,
+        archiveIssue: "archive-trimmed-for-browser"
+      };
+    } catch (error) {}
+
+    const watchlistRows = fullRows.slice(0, 10).map(function (row) {
+      return {
+        entryId: row.entryId,
+        name: row.name,
+        score: row.score,
+        createdAt: row.createdAt,
+        shiftBadge: row.shiftBadge,
+        reviewReason: row.reviewReason,
+        shiftPassport: {
+          sectorCode: row.shiftPassport.sectorCode,
+          brigadeCode: row.shiftPassport.brigadeCode
+        }
+      };
+    });
+
+    try {
+      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(watchlistRows));
+      return {
+        archiveSaved: true,
+        archiveMode: "watchlist-top10",
+        persistedRows: fullRows.slice(0, 10),
+        rowsSkipped: fullRows.length - 10,
+        archiveIssue: "only-top10-fits"
+      };
+    } catch (error) {}
+
+    return {
+      archiveSaved: false,
+      archiveMode: "screen-only",
+      persistedRows: fullRows,
+      rowsSkipped: 0,
+      archiveIssue: "browser-blocked-ledger"
     };
   }
 
-  function loadBrigadeBoard() {
-    const boardState = readBoardState();
+  function readCrewWatchboard() {
+    const archiveSnapshot = openBrigadeJournal();
 
-    if (boardState.repaired) {
-      persistBoard(boardState.entries);
+    if (archiveSnapshot.wasRepaired) {
+      stashBrigadeJournal(archiveSnapshot.rows);
+
+      if (archiveSnapshot.sourceKey !== CREW_LEDGER_KEY) {
+        try {
+          window.localStorage.removeItem(archiveSnapshot.sourceKey);
+        } catch (cleanupError) {}
+      }
     }
 
-    return boardState.entries;
+    return archiveSnapshot.rows;
   }
 
-  function saveShiftResult(summaryOrName, maybeScore) {
-    const boardState = readBoardState();
-    const shiftEntry = summaryOrName && typeof summaryOrName === "object"
-      ? buildShiftEntryFromSummary(summaryOrName)
-      : buildLegacyShiftEntry(summaryOrName, maybeScore);
-    const rankedBoard = boardState.entries.concat(shiftEntry).sort(compareBoardEntries);
-    const nextBoard = rankedBoard.slice(0, BOARD_LIMIT);
-    const persistResult = persistBoard(nextBoard);
-    const visibleBoard = persistResult.persistedEntries.slice(0, 10);
-    const rank = rankedBoard.findIndex(function (entry) {
-      return entry.entryId === shiftEntry.entryId;
+  function logShiftToDutyJournal(summaryOrName, maybeScore) {
+    const archiveSnapshot = openBrigadeJournal();
+    const currentRow = sealShiftHandover(summaryOrName, maybeScore);
+    const sameLaneHistory = archiveSnapshot.rows.filter(function (row) {
+      return row.archiveTag === currentRow.archiveTag;
+    }).slice(0, 4);
+    const repeatedHandChecks = sameLaneHistory.filter(function (row) {
+      return row.reviewFlag;
+    }).length;
+    const repeatedPlanMisses = sameLaneHistory.filter(function (row) {
+      return !row.planClosed;
+    }).length;
+    const rankedRows = archiveSnapshot.rows.concat(currentRow).sort(sortBrigadeLedger);
+    let rowsToStore = rankedRows.slice(0, ARCHIVE_LIMIT);
+    let auditRowPinned = false;
+
+    if (currentRow.reviewFlag && repeatedHandChecks >= 2) {
+      currentRow.serviceNote = currentRow.serviceNote
+        ? currentRow.serviceNote + "; линия третий раз подряд уходит на ручную сверку"
+        : "линия третий раз подряд уходит на ручную сверку";
+    } else if (!currentRow.reviewFlag && repeatedHandChecks >= 2) {
+      currentRow.serviceNote = currentRow.serviceNote
+        ? currentRow.serviceNote + "; линия снята с повторной сверки"
+        : "линия снята с повторной сверки";
+    }
+
+    if (currentRow.planClosed && repeatedPlanMisses >= 2) {
+      currentRow.serviceNote = currentRow.serviceNote
+        ? currentRow.serviceNote + "; участок закрыл план после серии провальных сдач"
+        : "участок закрыл план после серии провальных сдач";
+    }
+
+    if (currentRow.reviewFlag) {
+      const currentRowInsideArchive = rowsToStore.some(function (row) {
+        return row.entryId === currentRow.entryId;
+      });
+
+      if (!currentRowInsideArchive && rowsToStore.length) {
+        rowsToStore[rowsToStore.length - 1] = currentRow;
+        rowsToStore.sort(sortBrigadeLedger);
+        auditRowPinned = true;
+      }
+    }
+
+    const archiveReceipt = stashBrigadeJournal(rowsToStore);
+    const visibleRows = archiveReceipt.persistedRows.slice(0, 10);
+    const rank = rankedRows.findIndex(function (row) {
+      return row.entryId === currentRow.entryId;
     }) + 1;
 
-    return {
-      top10: visibleBoard,
-      rank: rank > 0 ? rank : rankedBoard.length + 1,
-      saved: persistResult.saved,
-      storageMode: persistResult.storageMode,
-      boardRepair: boardState.repaired,
-      droppedRecords: boardState.droppedRecords + persistResult.droppedByStorage,
-      pickerEntry: shiftEntry,
-      badge: shiftEntry.badge,
-      scoreAudit: shiftEntry.scoreAudit,
-      expectedScore: shiftEntry.expectedScore
-    };
-  }
-
-  function loadTerminalPrefs() {
-    const storedPrefs = readJson(TERMINAL_PREFS_KEY, {});
-    const safePrefs = {
-      fontSize: clamp(normalizeCounter(storedPrefs.fontSize) || 16, 12, 22),
-      soundEnabled: storedPrefs.soundEnabled !== false,
-      sectorCode: DISPATCH_PASSPORT.sectors[storedPrefs.sectorCode] ? storedPrefs.sectorCode : "bulk-lane",
-      brigadeCode: DISPATCH_PASSPORT.brigades[storedPrefs.brigadeCode] ? storedPrefs.brigadeCode : "north-3"
-    };
-
-    if (
-      !storedPrefs ||
-      storedPrefs.fontSize !== safePrefs.fontSize ||
-      storedPrefs.soundEnabled !== safePrefs.soundEnabled ||
-      storedPrefs.sectorCode !== safePrefs.sectorCode ||
-      storedPrefs.brigadeCode !== safePrefs.brigadeCode
-    ) {
-      writeJson(TERMINAL_PREFS_KEY, safePrefs);
+    if (archiveSnapshot.sourceKey !== CREW_LEDGER_KEY) {
+      try {
+        window.localStorage.removeItem(archiveSnapshot.sourceKey);
+      } catch (cleanupError) {}
     }
 
-    return safePrefs;
+    return {
+      top10: visibleRows,
+      rank: rank > 0 ? rank : rankedRows.length + 1,
+      archiveSaved: archiveReceipt.archiveSaved,
+      archiveMode: archiveReceipt.archiveMode,
+      archiveWasRepaired: archiveSnapshot.wasRepaired,
+      removedRows: archiveSnapshot.removedRows + archiveReceipt.rowsSkipped,
+      pickerRow: currentRow,
+      shiftBadge: currentRow.shiftBadge,
+      serviceNote: currentRow.serviceNote,
+      scoreCheck: currentRow.scoreCheck,
+      expectedPoints: currentRow.expectedPoints,
+      reviewFlag: currentRow.reviewFlag,
+      reviewReason: currentRow.reviewReason,
+      shiftBoss: currentRow.shiftBoss,
+      auditDesk: currentRow.auditDesk,
+      auditRowPinned: auditRowPinned,
+      archiveIssue: archiveSnapshot.archiveIssue || archiveReceipt.archiveIssue
+    };
   }
 
-  function saveTerminalPrefs(nextPrefs) {
-    const safePrefs = {
-      fontSize: clamp(normalizeCounter(nextPrefs && nextPrefs.fontSize) || 16, 12, 22),
-      soundEnabled: !(nextPrefs && nextPrefs.soundEnabled === false),
-      sectorCode: nextPrefs && DISPATCH_PASSPORT.sectors[nextPrefs.sectorCode] ? nextPrefs.sectorCode : "bulk-lane",
-      brigadeCode: nextPrefs && DISPATCH_PASSPORT.brigades[nextPrefs.brigadeCode] ? nextPrefs.brigadeCode : "north-3"
+  function pullDutyConsolePrefs() {
+    let storedPrefs = {};
+    let rawPrefs = "";
+    let sourceKey = DISPATCH_PREFS_KEY;
+
+    try {
+      rawPrefs = window.localStorage.getItem(DISPATCH_PREFS_KEY) || "";
+    } catch (error) {
+      rawPrefs = "";
+    }
+
+    if (!rawPrefs) {
+      for (let index = 0; index < LEGACY_DISPATCH_PREFS_KEYS.length; index += 1) {
+        try {
+          rawPrefs = window.localStorage.getItem(LEGACY_DISPATCH_PREFS_KEYS[index]) || "";
+        } catch (error) {
+          rawPrefs = "";
+        }
+
+        if (rawPrefs) {
+          sourceKey = LEGACY_DISPATCH_PREFS_KEYS[index];
+          break;
+        }
+      }
+    }
+
+    try {
+      storedPrefs = JSON.parse(rawPrefs || "{}");
+    } catch (error) {
+      storedPrefs = {};
+    }
+
+    const preparedPrefs = {
+      fontSize: Math.max(12, Math.min(22, Number(storedPrefs.fontSize) || 16)),
+      soundEnabled: storedPrefs.soundEnabled !== false,
+      sectorCode: AZOT_SHIFT_BOOK.sectors[storedPrefs.sectorCode] ? storedPrefs.sectorCode : "bulk-lane",
+      brigadeCode: AZOT_SHIFT_BOOK.brigades[storedPrefs.brigadeCode] ? storedPrefs.brigadeCode : "north-3"
     };
 
-    writeJson(TERMINAL_PREFS_KEY, safePrefs);
-    return safePrefs;
+    try {
+      window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(preparedPrefs));
+    } catch (error) {}
+
+    if (sourceKey !== DISPATCH_PREFS_KEY) {
+      try {
+        window.localStorage.removeItem(sourceKey);
+      } catch (cleanupError) {}
+    }
+
+    return preparedPrefs;
+  }
+
+  // Потеря настроек обрабатывается: пульт должен подняться с учетом запуска в инкогнито.
+  function stashDutyConsolePrefs(nextPrefs) {
+    const preparedPrefs = {
+      fontSize: Math.max(12, Math.min(22, Number(nextPrefs && nextPrefs.fontSize) || 16)),
+      soundEnabled: !(nextPrefs && nextPrefs.soundEnabled === false),
+      sectorCode: nextPrefs && AZOT_SHIFT_BOOK.sectors[nextPrefs.sectorCode] ? nextPrefs.sectorCode : "bulk-lane",
+      brigadeCode: nextPrefs && AZOT_SHIFT_BOOK.brigades[nextPrefs.brigadeCode] ? nextPrefs.brigadeCode : "north-3"
+    };
+
+    try {
+      window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(preparedPrefs));
+    } catch (error) {}
+
+    return preparedPrefs;
   }
 
   window.AZOTStorage = {
-    loadTerminalPrefs: loadTerminalPrefs,
-    saveTerminalPrefs: saveTerminalPrefs,
-    loadBrigadeBoard: loadBrigadeBoard,
-    saveShiftResult: saveShiftResult
+    pullDutyConsolePrefs: pullDutyConsolePrefs,
+    stashDutyConsolePrefs: stashDutyConsolePrefs,
+    readCrewWatchboard: readCrewWatchboard,
+    logShiftToDutyJournal: logShiftToDutyJournal
   };
 })();

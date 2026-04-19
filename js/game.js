@@ -1,5 +1,5 @@
 ﻿(function () {
-  // Базовые размеры сцены и физики.
+  // Учебный склад живёт в одном фиксированном окне: под него подогнаны спрайты, полки и верхний пульт.
   const GAME_WIDTH = 1024;
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
@@ -9,7 +9,7 @@
   const COYOTE_TIME = 0.08;
   const BOOST_DURATION = 5;
 
-  // Все кадры лежат в одном описании, чтобы не искать их по файлу.
+  // В одном атласе лежат и комплектовщик, и коробки, и тележки — старому терминалу так проще.
   const AZOT_FRAMES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
@@ -23,7 +23,7 @@
     cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
   };
 
-  // Участок меняет состав заказов и темп помех на смене.
+  // У каждого участка своя сменная нервозность: на воротах больше срочки, на хрупком ряду больше боя, на паллетах выше поток.
   const SHIFT_SECTOR_RULES = {
     "bulk-lane": {
       urgentBonus: -0.05,
@@ -54,11 +54,11 @@
     }
   };
 
-  function clamp(value, min, max) {
+  function holdLaneBounds(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
 
-  function rectsIntersect(a, b) {
+  function touchOnRack(a, b) {
     return (
       a.x < b.x + b.w &&
       a.x + a.w > b.x &&
@@ -67,7 +67,7 @@
     );
   }
 
-  function createEmptyShiftStats() {
+  function openShiftSheet() {
     return {
       ordinarySpawned: 0,
       urgentSpawned: 0,
@@ -87,25 +87,47 @@
     };
   }
 
-  // Паспорт участка передаём из диспетчерской формы в саму смену.
-  function normalizeShiftPassport(passport) {
+  // Игра держит тот же паспорт смены, что и пульт: линия, маршрут сдачи и кто принимает ведомость.
+  function adoptDispatchSlip(passport) {
     const source = passport && typeof passport === 'object' ? passport : {};
     const sectorCode = SHIFT_SECTOR_RULES[source.sectorCode] ? source.sectorCode : 'bulk-lane';
+    const sectorLabel = source.sectorLabel || (
+      sectorCode === 'rush-dock' ? 'Экспресс-ворота' :
+      sectorCode === 'fragile-bay' ? 'Хрупкий ряд' :
+      'Паллетный ряд'
+    );
+    const sectorShortLabel = source.sectorShortLabel || (
+      sectorCode === 'rush-dock' ? 'Экспресс' :
+      sectorCode === 'fragile-bay' ? 'Хрупкий' :
+      'Паллеты'
+    );
+    const brigadeCode = typeof source.brigadeCode === 'string' ? source.brigadeCode : 'north-3';
+    const brigadeLabel = source.brigadeLabel || 'Север-3';
 
     return {
       sectorCode: sectorCode,
-      sectorLabel: source.sectorLabel || (
-        sectorCode === 'rush-dock' ? 'Экспресс-ворота' :
-        sectorCode === 'fragile-bay' ? 'Хрупкий ряд' :
-        'Паллетный ряд'
+      sectorLabel: sectorLabel,
+      sectorShortLabel: sectorShortLabel,
+      boardTag: source.boardTag || (
+        sectorCode === 'rush-dock' ? 'EXP-04' :
+        sectorCode === 'fragile-bay' ? 'FRG-09' :
+        'PLT-17'
       ),
-      sectorShortLabel: source.sectorShortLabel || (
-        sectorCode === 'rush-dock' ? 'Экспресс' :
-        sectorCode === 'fragile-bay' ? 'Хрупкий' :
-        'Паллеты'
+      brigadeCode: brigadeCode,
+      brigadeLabel: brigadeLabel,
+      brigadeLead: source.brigadeLead || '',
+      brigadeCallSign: source.brigadeCallSign || (
+        brigadeCode === 'azot-pack' ? 'AZP' :
+        brigadeCode === 'night-belt' ? 'NBT' :
+        'N3'
       ),
-      brigadeCode: typeof source.brigadeCode === 'string' ? source.brigadeCode : 'north-3',
-      brigadeLabel: source.brigadeLabel || 'Север-3'
+      handoverDesk: source.handoverDesk || '',
+      targetPoints: Number(source.targetPoints) || 0,
+      planNote: source.planNote || '',
+      issueLimitNote: source.issueLimitNote || '',
+      shiftRoute: source.shiftRoute || '',
+      launchBrief: source.launchBrief || '',
+      faultStamp: source.faultStamp || ''
     };
   }
 
@@ -114,7 +136,7 @@
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.options = options;
-    this.shiftPassport = normalizeShiftPassport(options.shiftPassport);
+    this.shiftPassport = adoptDispatchSlip(options.shiftPassport);
     this.sectorRules = SHIFT_SECTOR_RULES[this.shiftPassport.sectorCode];
     this.audio = options.audio || {
       startAmbient: function () {},
@@ -126,7 +148,7 @@
     this.bgTile = new Image();
     this.bgTile.src = 'assets/bg-tile.png';
 
-    // Здесь живёт всё состояние одной смены.
+    // Это не абстрактный движок, а одна конкретная смена: кто вышел, что падает с полок и сколько осталось времени.
     this.lastTimestamp = 0;
     this.warehouseDrift = 0;
     this.running = false;
@@ -155,7 +177,7 @@
     this.radioMessage = '';
     this.radioMessageTimer = 0;
     this.dockPopups = [];
-    this.shiftStats = createEmptyShiftStats();
+    this.shiftStats = openShiftSheet();
 
     this.player = null;
     this.rackPlatforms = [];
@@ -170,7 +192,7 @@
   }
 
   AzotShiftRunner.prototype.start = function (pickerName, testMode) {
-    // Если браузер не дал canvas, корректно выходим сразу.
+    // На части учебных терминалов canvas бывает заблокирован политикой браузера, и смену нужно закрыть как техсбой.
     if (!this.ctx) {
       if (typeof this.options.onFinish === 'function') {
         this.options.onFinish({
@@ -180,7 +202,7 @@
           lives: 0,
           reason: 'canvas-error',
           shiftPassport: this.shiftPassport,
-          stats: createEmptyShiftStats()
+          stats: openShiftSheet()
         });
       }
       return;
@@ -206,9 +228,9 @@
     this.radioMessage = this.testMode ? 'TEST MODE' : 'Смена началась: ' + this.shiftPassport.sectorLabel;
     this.radioMessageTimer = 1.4;
     this.dockPopups = [];
-    this.shiftStats = createEmptyShiftStats();
+    this.shiftStats = openShiftSheet();
 
-    this.buildWarehouseFloor();
+    this.layOutTrainingRackFloor();
 
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
@@ -225,8 +247,8 @@
     window.removeEventListener('keyup', this.handleKeyUp);
   };
 
-  AzotShiftRunner.prototype.buildWarehouseFloor = function () {
-    // Расклад полок и стартовая точка игрока.
+  AzotShiftRunner.prototype.layOutTrainingRackFloor = function () {
+    // Расклад полок повторяет один и тот же учебный склад, чтобы преподаватель видел знакомую геометрию смены.
     this.rackPlatforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
       { x: 40,  y: 600, w: 180, h: 18, solid: true },
@@ -297,18 +319,18 @@
     }
   };
 
-  AzotShiftRunner.prototype.getDifficulty = function () {
-    return clamp(this.runTime / 55, 0, 1);
+  AzotShiftRunner.prototype.readShiftHeat = function () {
+    return holdLaneBounds(this.runTime / 55, 0, 1);
   };
 
-  AzotShiftRunner.prototype.getTargetActiveOrders = function () {
-    return 5 + this.sectorRules.activeOrdersBonus + Math.floor(this.getDifficulty() * 5);
+  AzotShiftRunner.prototype.readLaneQuota = function () {
+    return 5 + this.sectorRules.activeOrdersBonus + Math.floor(this.readShiftHeat() * 5);
   };
 
-  AzotShiftRunner.prototype.chooseOrderType = function () {
-    const difficulty = this.getDifficulty();
-    const fragileChance = clamp(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
-    const urgentChance = clamp(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
+  AzotShiftRunner.prototype.pullNextCargoTag = function () {
+    const difficulty = this.readShiftHeat();
+    const fragileChance = holdLaneBounds(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
+    const urgentChance = holdLaneBounds(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
     const roll = Math.random();
 
     if (roll < fragileChance) {
@@ -338,7 +360,7 @@
     return result.length ? result : [1];
   };
 
-  AzotShiftRunner.prototype.createWarehouseOrder = function (type, targetPlatformIndex) {
+  AzotShiftRunner.prototype.cutCargoFromDock = function (type, targetPlatformIndex) {
     const platform = this.rackPlatforms[targetPlatformIndex];
     const sizeMap = {
       ordinary: { w: 30, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
@@ -379,7 +401,7 @@
     const availablePlatforms = this.rackPlatforms.slice(1);
     const targetPlatform = availablePlatforms[Math.floor(Math.random() * availablePlatforms.length)];
     const targetPlatformIndex = this.rackPlatforms.indexOf(targetPlatform);
-    const type = this.chooseOrderType();
+    const type = this.pullNextCargoTag();
     if (type === 'fragile') {
       this.shiftStats.fragileSpawned += 1;
     } else if (type === 'urgent') {
@@ -387,7 +409,7 @@
     } else {
       this.shiftStats.ordinarySpawned += 1;
     }
-    this.warehouseOrders.push(this.createWarehouseOrder(type, targetPlatformIndex));
+    this.warehouseOrders.push(this.cutCargoFromDock(type, targetPlatformIndex));
   };
 
   AzotShiftRunner.prototype.spawnEnergyPickup = function () {
@@ -413,12 +435,12 @@
     this.player.airJumpsLeft = Math.max(this.player.airJumpsLeft, 1);
     this.radioMessage = 'Энергетик: ускорение и двойной прыжок';
     this.radioMessageTimer = 1.1;
-    this.pushDockPopup(this.player.x, this.player.y - 10, 'BOOST');
+    this.postDockStamp(this.player.x, this.player.y - 10, 'BOOST');
     this.audio.play('pickupRare');
   };
 
   AzotShiftRunner.prototype.spawnForklift = function () {
-    const difficulty = this.getDifficulty();
+    const difficulty = this.readShiftHeat();
     const lane = this.forkliftLanes[Math.floor(Math.random() * this.forkliftLanes.length)];
     const fromLeft = Math.random() < 0.5;
     const baseSpeed = 190 + difficulty * 120 + this.sectorRules.forkliftSpeedBonus;
@@ -475,7 +497,7 @@
       this.resetPlayerAfterFall();
       this.audio.play('hit');
       this.flashTimer = 0.2;
-      this.pushDockPopup(this.player.x, this.player.y - 8, 'TEST');
+      this.postDockStamp(this.player.x, this.player.y - 8, 'TEST');
       this.radioMessage = 'Тестовый сброс после падения';
       this.radioMessageTimer = 0.9;
       return;
@@ -494,7 +516,7 @@
     }
 
     this.resetPlayerAfterFall();
-    this.pushDockPopup(this.player.x, this.player.y - 8, '-10');
+    this.postDockStamp(this.player.x, this.player.y - 8, '-10');
     this.radioMessage = 'Падение: -10 очков, осталось жизней ' + this.lives;
     this.radioMessageTimer = 1.1;
   };
@@ -553,12 +575,12 @@
     window.removeEventListener('keyup', this.handleKeyUp);
 
     if (typeof this.options.onFinish === 'function') {
-      this.options.onFinish(this.buildShiftSummary(reason));
+      this.options.onFinish(this.sealShiftSummary(reason));
     }
   };
 
-  AzotShiftRunner.prototype.buildShiftSummary = function (reason) {
-    const stats = this.shiftStats || createEmptyShiftStats();
+  AzotShiftRunner.prototype.sealShiftSummary = function (reason) {
+    const stats = this.shiftStats || openShiftSheet();
 
     return {
       pickerName: this.pickerAlias,
@@ -611,7 +633,7 @@
   };
 
   AzotShiftRunner.prototype.update = function (dt) {
-    // В паузе живут только служебные таймеры и визуальные мелочи.
+    // В паузе функционируют только служебные таймеры.
     this.warehouseDrift += dt * (this.paused ? 18 : 48);
 
     if (this.radioMessageTimer > 0) {
@@ -659,15 +681,15 @@
     }
 
     this.orderDropTimer -= dt;
-    if (this.orderDropTimer <= 0 && this.warehouseOrders.length < this.getTargetActiveOrders()) {
+    if (this.orderDropTimer <= 0 && this.warehouseOrders.length < this.readLaneQuota()) {
       this.spawnFallingOrder();
-      this.orderDropTimer = 0.95 - this.getDifficulty() * 0.45 + Math.random() * 0.25;
+      this.orderDropTimer = 0.95 - this.readShiftHeat() * 0.45 + Math.random() * 0.25;
     }
 
     this.forkliftSpawnTimer -= dt;
-    if (this.forkliftSpawnTimer <= 0 && this.forkliftPatrols.length < 3 + Math.floor(this.getDifficulty() * 5)) {
+    if (this.forkliftSpawnTimer <= 0 && this.forkliftPatrols.length < 3 + Math.floor(this.readShiftHeat() * 5)) {
       this.spawnForklift();
-      this.forkliftSpawnTimer = 2.4 - this.getDifficulty() * 1.45 + Math.random() * 0.35;
+      this.forkliftSpawnTimer = 2.4 - this.readShiftHeat() * 1.45 + Math.random() * 0.35;
     }
 
     this.energySpawnTimer -= dt;
@@ -709,7 +731,7 @@
         player.vy = -player.jumpForce;
         player.airJumpsLeft -= 1;
         this.audio.play('jump');
-        this.pushDockPopup(player.x, player.y - 6, 'x2');
+        this.postDockStamp(player.x, player.y - 6, 'x2');
       }
     }
     this.playerControls.jumpQueued = false;
@@ -742,7 +764,7 @@
 
       const platform = this.rackPlatforms[i];
       const wasAbove = previousY + player.h <= platform.y;
-      const nowIntersect = rectsIntersect(player, platform);
+      const nowIntersect = touchOnRack(player, platform);
       if (wasAbove && nowIntersect && player.vy >= 0) {
         player.y = platform.y - player.h;
         player.vy = 0;
@@ -813,7 +835,7 @@
       this.shiftStats.ordinaryPicked += 1;
     }
     this.audio.play(cargo.type === 'ordinary' ? 'pickup' : 'pickupRare');
-    this.pushDockPopup(cargo.x, cargo.y, '+' + cargo.value);
+    this.postDockStamp(cargo.x, cargo.y, '+' + cargo.value);
 
     if (cargo.type === 'fragile') {
       this.radioMessage = 'Хрупкий заказ пойман до падения';
@@ -831,7 +853,7 @@
     const platform = this.rackPlatforms[platformIndex];
     this.warehouseOrders.splice(index, 1);
     this.shiftStats.fragileBroken += 1;
-    this.pushDockPopup(item.x, platform.y - 12, 'x');
+    this.postDockStamp(item.x, platform.y - 12, 'x');
     this.radioMessage = 'Хрупкий заказ разбился';
     this.radioMessageTimer = 0.8;
     this.flashTimer = 0.1;
@@ -840,19 +862,19 @@
   AzotShiftRunner.prototype.expireUrgentCargo = function (index, item) {
     this.warehouseOrders.splice(index, 1);
     this.shiftStats.urgentExpired += 1;
-    this.pushDockPopup(item.x, item.y, '!');
+    this.postDockStamp(item.x, item.y, '!');
     this.radioMessage = 'Срочный заказ просрочен';
     this.radioMessageTimer = 0.8;
   };
 
   AzotShiftRunner.prototype.updateWarehouseOrders = function (dt) {
-    // Заказы проходят через падение, подбор и штрафные сценарии.
+    // Здесь живёт реальная возня смены: что-то долетает до полки, что-то ловят, что-то уходит в брак.
     for (let i = this.warehouseOrders.length - 1; i >= 0; i -= 1) {
       const cargo = this.warehouseOrders[i];
       cargo.pulse += dt * 4.5;
       cargo.bobPhase += dt * 3;
 
-      if (rectsIntersect(this.player, cargo)) {
+      if (touchOnRack(this.player, cargo)) {
         this.collectOrderCargo(i);
         continue;
       }
@@ -912,7 +934,7 @@
         continue;
       }
 
-      if (rectsIntersect(this.player, energyCan)) {
+      if (touchOnRack(this.player, energyCan)) {
         this.applyEnergyRush();
         this.energyPickups.splice(i, 1);
         continue;
@@ -920,7 +942,7 @@
 
       for (let patrolIndex = 0; patrolIndex < this.forkliftPatrols.length; patrolIndex += 1) {
         const cart = this.forkliftPatrols[patrolIndex];
-        if (cart.platformIndex === energyCan.platformIndex && rectsIntersect(cart, energyCan)) {
+        if (cart.platformIndex === energyCan.platformIndex && touchOnRack(cart, energyCan)) {
           this.energyPickups.splice(i, 1);
           break;
         }
@@ -934,7 +956,7 @@
       cart.x += cart.speed * cart.dir * dt;
       cart.anim += dt * 8;
 
-      if (this.player.invulnerability <= 0 && rectsIntersect(this.player, cart)) {
+      if (this.player.invulnerability <= 0 && touchOnRack(this.player, cart)) {
         this.score = Math.max(0, this.score - 15);
         this.shiftStats.cartHits += 1;
         this.player.invulnerability = 1.1;
@@ -944,12 +966,12 @@
         this.radioMessage = 'Тележка сбила заказ';
         this.radioMessageTimer = 0.9;
         this.audio.play('hit');
-        this.pushDockPopup(this.player.x, this.player.y - 8, '-15');
+        this.postDockStamp(this.player.x, this.player.y - 8, '-15');
       }
 
       for (let cargoIndex = this.warehouseOrders.length - 1; cargoIndex >= 0; cargoIndex -= 1) {
         const cargo = this.warehouseOrders[cargoIndex];
-        if (rectsIntersect(cart, cargo)) {
+        if (touchOnRack(cart, cargo)) {
           const penalty = cargo.type === 'fragile' ? 15 : cargo.type === 'urgent' ? 8 : 5;
           this.warehouseOrders.splice(cargoIndex, 1);
           this.score = Math.max(0, this.score - penalty);
@@ -969,7 +991,7 @@
             this.radioMessage = 'Тележка увезла заказ';
           }
           this.radioMessageTimer = 0.85;
-          this.pushDockPopup(cargo.x, cargo.y, '-' + penalty);
+          this.postDockStamp(cargo.x, cargo.y, '-' + penalty);
         }
       }
 
@@ -979,7 +1001,7 @@
     }
   };
 
-  AzotShiftRunner.prototype.pushDockPopup = function (x, y, text) {
+  AzotShiftRunner.prototype.postDockStamp = function (x, y, text) {
     this.dockPopups.push({
       x: x,
       y: y,
@@ -988,7 +1010,7 @@
     });
   };
 
-  AzotShiftRunner.prototype.readTerminalFontSize = function () {
+  AzotShiftRunner.prototype.readTerminalTypeSize = function () {
     const rootStyle = window.getComputedStyle(document.documentElement);
     return parseFloat(rootStyle.getPropertyValue('--ui-font-size')) || 16;
   };
@@ -1091,7 +1113,7 @@
   };
 
   AzotShiftRunner.prototype.renderBackground = function (ctx) {
-    // Фон рисуем слоями, чтобы склад не выглядел плоским.
+    // На фоне специально оставлены трубы, свет и тени, чтобы смена читалась как склад, а не как пустая коробка.
     ctx.fillStyle = '#0d1116';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
@@ -1258,7 +1280,7 @@
       ctx.strokeStyle = 'rgba(255, 191, 89,' + pulse.toFixed(3) + ')';
       ctx.lineWidth = 2;
       ctx.strokeRect(cargo.x - 2, cargo.y - 2, cargo.w + 4, cargo.h + 4);
-      const ttlRatio = clamp(cargo.ttl / 5, 0, 1);
+      const ttlRatio = holdLaneBounds(cargo.ttl / 5, 0, 1);
       ctx.fillStyle = 'rgba(255, 179, 71, 0.85)';
       ctx.fillRect(cargo.x, cargo.y - 6, cargo.w * ttlRatio, 3);
       ctx.restore();
@@ -1335,7 +1357,7 @@
     );
 
     if (player.boostTimer > 0) {
-      const boostRatio = clamp(player.boostTimer / BOOST_DURATION, 0, 1);
+      const boostRatio = holdLaneBounds(player.boostTimer / BOOST_DURATION, 0, 1);
       ctx.save();
       ctx.strokeStyle = 'rgba(82, 255, 123, 0.68)';
       ctx.lineWidth = 2;
@@ -1349,19 +1371,19 @@
       ctx.fillStyle = 'rgba(120, 184, 255, 0.12)';
       ctx.fillRect(draw.x - 10, draw.y - 18, 58, 16);
       ctx.fillStyle = '#eaf5ff';
-      ctx.font = Math.max(10, Math.round(this.readTerminalFontSize() * 0.75)) + 'px Segoe UI';
+      ctx.font = Math.max(10, Math.round(this.readTerminalTypeSize() * 0.75)) + 'px Segoe UI';
       ctx.fillText('TEST', draw.x, draw.y - 6);
     }
   };
 
   AzotShiftRunner.prototype.renderDockPopups = function (ctx) {
     ctx.save();
-    ctx.font = 'bold ' + Math.round(this.readTerminalFontSize() * 1.125) + 'px Segoe UI';
+    ctx.font = 'bold ' + Math.round(this.readTerminalTypeSize() * 1.125) + 'px Segoe UI';
     ctx.textAlign = 'center';
 
     for (let i = 0; i < this.dockPopups.length; i += 1) {
       const popup = this.dockPopups[i];
-      const alpha = clamp(popup.life, 0, 1);
+      const alpha = holdLaneBounds(popup.life, 0, 1);
       ctx.fillStyle = popup.text.indexOf('-') === 0
         ? 'rgba(255, 132, 132,' + alpha.toFixed(3) + ')'
         : 'rgba(173, 255, 202,' + alpha.toFixed(3) + ')';
@@ -1392,7 +1414,7 @@
     ctx.fillStyle = statusGlow;
     ctx.fillRect(320, 90, 384, 4);
     ctx.fillStyle = '#eff9fb';
-    ctx.font = '600 ' + Math.round(this.readTerminalFontSize() * 1.25) + 'px Segoe UI';
+    ctx.font = '600 ' + Math.round(this.readTerminalTypeSize() * 1.25) + 'px Segoe UI';
     ctx.textAlign = 'center';
     ctx.fillText(this.radioMessage, 512, 114);
     ctx.restore();
