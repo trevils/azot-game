@@ -175,8 +175,8 @@ body {
 
 .loader-mascot {
   display: block;
-  width: 68px;
-  height: 78px;
+  width: 66px;
+  height: 76px;
   padding: 2px;
   object-fit: contain;
   flex: 0 0 auto;
@@ -569,8 +569,8 @@ body {
   }
 
   .loader-mascot {
-    width: 64px;
-    height: 72px;
+    width: 62px;
+    height: 70px;
   }
 
   .dispatch-console .dispatch-control-row {

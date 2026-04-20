@@ -302,8 +302,8 @@
       return ledgerRow;
     }
 
-    // Орлова (паллеты) просила отмечать смены без потерь. Климов (экспресс) попросил за закрытые в срок окна.
-    // Ланина (хрупкий) требовала отмечать при нулевом бое. Чернов (ночная лента) давил на добавление мотивирующего бейджа.
+    //(паллеты) отмечать смены без потерь. (экспресс) закрытые в срок окна.
+    // (хрупкий) отмечать при нулевом бое. (ночная лента) добавление мотивирующего бейджа.
     if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
       ledgerRow.shiftBadge = "Север-3 без потерь";
     } else if (passport.sectorCode === "rush-dock" && shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
@@ -373,6 +373,9 @@
     return ledgerRow;
   }
 
+  // Совместимость со старым именем функции, которое всё ещё используется ниже по файлу.
+  const cutBrigadeLedgerRow = validateAndScoreShift;
+
   function sortBrigadeLedger(leftRow, rightRow) {
     if (leftRow.score !== rightRow.score) {
       return rightRow.score - leftRow.score;
@@ -420,7 +423,7 @@
       stats: {}
     });
   }
-  // На стенде часто жмут "закрыть смену" два раза, браузер воспринимает как enter-enter.
+  // На стенде жмут "закрыть смену" два раза, браузер воспринимает как enter-enter.
   // Поэтому в архиве иногда дублируются записи — ниже фильтруем по отпечаткам.
   // openBrigadeJournal: загрузка архива смен из localStorage.
   // - Если новая версия потеряна — пытаемся восстановить из legacy v4.
@@ -438,7 +441,7 @@
     const knownIds = {};
     const knownShiftFingerprints = {};
 
-    // Попытка загрузить из нового хранилища (v5). Если браузер заблокировал localStorage — сдаёмся.
+    // Попытка загрузить из нового хранилища (v5). Если браузер заблокировал localStorage — бьём ошибку.
     try {
       rawArchive = window.localStorage.getItem(CREW_LEDGER_KEY) || "";
     } catch (error) {

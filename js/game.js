@@ -24,8 +24,8 @@
     cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
   };
 
-  // У каждого участка свои экономические условия: Экспрессу нужна скорость, хрупкому ряду — аккуратность,
-  // паллетам — стабильный поток. Параметры подобраны для сохранения средней производительности 160-180 очков за смену.
+  // У каждого участка свой характер потока: экспресс тянет к срочности, хрупкий ряд — к аккуратной сборке,
+  // паллеты держат стабильный фон. В TEST MODE ниже добавляются отдельные смещения под испытания участка.
   const SHIFT_SECTOR_RULES = {
     "bulk-lane": {
       urgentBonus: -0.05,
@@ -55,6 +55,25 @@
       energyRespawnBase: 15
     }
   };
+
+  const TEST_SHIFT_RULES = {
+    "bulk-lane": {
+      urgentShift: 0,
+      fragileShift: 0
+    },
+    "rush-dock": {
+      urgentShift: 0.16,
+      fragileShift: -0.12
+    },
+    "fragile-bay": {
+      urgentShift: -0.14,
+      fragileShift: 0.16
+    }
+  };
+
+  function readTestSectorRule(sectorCode) {
+    return TEST_SHIFT_RULES[sectorCode] || TEST_SHIFT_RULES["bulk-lane"];
+  }
 
   // каждый параметр отслеживается отдельно потому что отчёты требуют деталей.
   // нужна полная статистика для архива каждой смены.
@@ -128,6 +147,11 @@
       "rush-dock": "EXP-04",
       "fragile-bay": "FRG-09"
     };
+    const sectorTargetPoints = {
+      "bulk-lane": 400,
+      "rush-dock": 180,
+      "fragile-bay": 150
+    };
     const brigadeSigns = {
       "azot-pack": "AZP",
       "night-belt": "NBT"
@@ -143,7 +167,7 @@
       brigadeLead: passport.brigadeLead || '',
       brigadeCallSign: passport.brigadeCallSign || brigadeSigns[passport.brigadeCode || ''] || 'N3',
       handoverDesk: passport.handoverDesk || '',
-      targetPoints: Number(passport.targetPoints) || 0,
+      targetPoints: Math.max(Number(passport.targetPoints) || 0, sectorTargetPoints[sector]),
       planNote: passport.planNote || '',
       issueLimitNote: passport.issueLimitNote || '',
       shiftRoute: passport.shiftRoute || '',
@@ -157,13 +181,26 @@
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.options = options;
-    this.shiftPassport = normalizeShiftPassport(options.shiftPassport);
+    this.shiftPassport = normalizeShiftPassport(options.shiftPassport || options.shiftInfo);
     this.sectorRules = SHIFT_SECTOR_RULES[this.shiftPassport.sectorCode];
     this.audio = options.audio || {
       startAmbient: function () {},
       stopAmbient: function () {},
       play: function () {}
     };
+    if (typeof this.audio.startAmbient !== 'function') {
+      this.audio.startAmbient = typeof this.audio.startBg === 'function'
+        ? this.audio.startBg.bind(this.audio)
+        : function () {};
+    }
+    if (typeof this.audio.stopAmbient !== 'function') {
+      this.audio.stopAmbient = typeof this.audio.stopBg === 'function'
+        ? this.audio.stopBg.bind(this.audio)
+        : function () {};
+    }
+    if (typeof this.audio.play !== 'function') {
+      this.audio.play = function () {};
+    }
     this.sprites = new Image();
     this.sprites.src = 'assets/sprites.png';
     this.bgTile = new Image();
@@ -216,14 +253,16 @@
     /* На части учебных терминалов canvas бывает заблокирован политикой браузера,
      и смену нужно закрыть как техсбой.*/
     if (!this.ctx) {
-      if (typeof this.options.onFinish === 'function') {
-        this.options.onFinish({
+      const finishHandler = this.options.onFinish || this.options.onEnd;
+      if (typeof finishHandler === 'function') {
+        finishHandler({
           pickerName: pickerName || 'Игрок',
           score: 0,
           testMode: !!testMode,
           lives: 0,
           reason: 'canvas-error',
           shiftPassport: this.shiftPassport,
+          shiftInfo: this.shiftPassport,
           stats: makeShiftCounters()
         });
       }
@@ -351,8 +390,21 @@
 
   AzotShiftRunner.prototype.pullNextCargoTag = function () {
     const difficulty = this.readShiftHeat();
-    const fragileChance = clampShiftRatio(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
-    const urgentChance = clampShiftRatio(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
+    let fragileChance = clampShiftRatio(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
+    let urgentChance = clampShiftRatio(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
+
+    if (this.testMode) {
+      const testRules = readTestSectorRule(this.shiftPassport.sectorCode);
+      fragileChance = clampShiftRatio(fragileChance + testRules.fragileShift, 0.05, 0.66);
+      urgentChance = clampShiftRatio(urgentChance + testRules.urgentShift, 0.05, 0.72);
+
+      if (this.shiftPassport.sectorCode === 'rush-dock' && fragileChance + urgentChance > 0.95) {
+        fragileChance = Math.max(0.05, 0.95 - urgentChance);
+      } else if (this.shiftPassport.sectorCode === 'fragile-bay' && fragileChance + urgentChance > 0.95) {
+        urgentChance = Math.max(0.05, 0.95 - fragileChance);
+      }
+    }
+
     const roll = Math.random();
 
     if (roll < fragileChance) {
@@ -582,8 +634,9 @@
       return;
     }
     this.paused = !this.paused;
-    if (typeof this.options.onPauseChange === 'function') {
-      this.options.onPauseChange(this.paused);
+    const pauseHandler = this.options.onPauseChange || this.options.onPauseToggle;
+    if (typeof pauseHandler === 'function') {
+      pauseHandler(this.paused);
     }
   };
 
@@ -598,8 +651,9 @@
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
 
-    if (typeof this.options.onFinish === 'function') {
-      this.options.onFinish(this.sealShiftSummary(reason));
+    const finishHandler = this.options.onFinish || this.options.onEnd;
+    if (typeof finishHandler === 'function') {
+      finishHandler(this.sealShiftSummary(reason));
     }
   };
 
@@ -608,11 +662,13 @@
 
     return {
       pickerName: this.pickerAlias,
+      workerName: this.pickerAlias,
       score: this.score,
       testMode: this.testMode,
       lives: this.lives,
       reason: reason || 'complete',
       shiftPassport: this.shiftPassport,
+      shiftInfo: this.shiftPassport,
       stats: {
         ordinarySpawned: stats.ordinarySpawned,
         urgentSpawned: stats.urgentSpawned,
@@ -1041,14 +1097,17 @@
   };
 
   AzotShiftRunner.prototype.broadcastShiftBoard = function () {
-    if (typeof this.options.onShiftBoardUpdate === 'function') {
-      this.options.onShiftBoardUpdate({
+    const updateHandler = this.options.onShiftBoardUpdate || this.options.onStateUpdate;
+    if (typeof updateHandler === 'function') {
+      updateHandler({
         pickerName: this.pickerAlias,
+        workerName: this.pickerAlias,
         testMode: this.testMode,
         score: this.score,
         timeLeft: this.timeLeft,
         lives: this.lives,
-        shiftPassport: this.shiftPassport
+        shiftPassport: this.shiftPassport,
+        shiftInfo: this.shiftPassport
       });
     }
   };

@@ -1,376 +1,394 @@
 (function () {
-  const terminalScenes = {
-    dutyDesk: document.getElementById("azot-dispatch-scene"),
-    rackFloor: document.getElementById("rack-floor-scene"),
-    handoverDesk: document.getElementById("shift-ledger-scene")
+  const screens = {
+    dispatch: document.getElementById("azot-dispatch-scene"),
+    game: document.getElementById("rack-floor-scene"),
+    summary: document.getElementById("shift-ledger-scene")
   };
 
-  const dutyDesk = {
-    badgeAliasInput: document.getElementById("picker-badge-input"),
-    laneSelect: document.getElementById("azot-sector-code"),
-    crewSelect: document.getElementById("brigade-call-code"),
-    releaseShiftButton: document.getElementById("dispatch-shift-btn"),
-    dispatchSoundButton: document.getElementById("dispatch-sound-toggle"),
-    typeDownButton: document.getElementById("dispatch-font-down"),
-    typeUpButton: document.getElementById("dispatch-font-up"),
-
-    shiftCanvas: document.getElementById("game-canvas"),
-
-    boardBadge: document.getElementById("hud-picker"),
-    boardLane: document.getElementById("hud-sector-readout"),
-    boardTimer: document.getElementById("hud-shift-clock"),
-    boardScore: document.getElementById("hud-cargo-score"),
-    boardLives: document.getElementById("hud-fall-limit"),
-
-    freezeShiftButton: document.getElementById("shift-pause-btn"),
-    floorSoundButton: document.getElementById("shift-sound-btn"),
-    closeShiftButton: document.getElementById("handover-shift-btn"),
-    freezeGate: document.getElementById("forklift-pause-gate"),
-    reopenShiftButton: document.getElementById("resume-shift-btn"),
-
-    handoverHeadline: document.getElementById("handover-summary"),
-    handoverBody: document.getElementById("handover-note"),
-    brigadeTableBody: document.getElementById("brigade-ledger-body"),
-    handoverRankLine: document.getElementById("picker-ledger-rank"),
-    rerunButton: document.getElementById("restart-shift-btn"),
-    returnButton: document.getElementById("return-dispatch-btn")
+  const ui = {
+    workerInput: document.getElementById("picker-badge-input"),
+    lineSelect: document.getElementById("azot-sector-code"),
+    brigadeSelect: document.getElementById("brigade-call-code"),
+    startBtn: document.getElementById("dispatch-shift-btn"),
+    soundBtnDispatch: document.getElementById("dispatch-sound-toggle"),
+    fontDecBtn: document.getElementById("dispatch-font-down"),
+    fontIncBtn: document.getElementById("dispatch-font-up"),
+    canvas: document.getElementById("game-canvas"),
+    workerBadge: document.getElementById("hud-picker"),
+    lineBadge: document.getElementById("hud-sector-readout"),
+    timer: document.getElementById("hud-shift-clock"),
+    scoreBoard: document.getElementById("hud-cargo-score"),
+    livesBoard: document.getElementById("hud-fall-limit"),
+    pauseBtn: document.getElementById("shift-pause-btn"),
+    soundBtnFloor: document.getElementById("shift-sound-btn"),
+    endBtn: document.getElementById("handover-shift-btn"),
+    pauseOverlay: document.getElementById("forklift-pause-gate"),
+    resumeBtn: document.getElementById("resume-shift-btn"),
+    summaryTitle: document.getElementById("handover-summary"),
+    summaryBody: document.getElementById("handover-note"),
+    ledgerTable: document.getElementById("brigade-ledger-body"),
+    rankLine: document.getElementById("picker-ledger-rank"),
+    repeatBtn: document.getElementById("restart-shift-btn"),
+    backBtn: document.getElementById("return-dispatch-btn")
   };
 
-  // Здесь лежит рабочая карта склада: коды линий, планки и столы сдачи.
-  const azotDutyBoard = {
-    sectors: {
+  const requiredElements = [
+    { elem: screens.dispatch, id: "azot-dispatch-scene" },
+    { elem: screens.game, id: "rack-floor-scene" },
+    { elem: screens.summary, id: "shift-ledger-scene" },
+    { elem: ui.workerInput, id: "picker-badge-input" },
+    { elem: ui.lineSelect, id: "azot-sector-code" },
+    { elem: ui.brigadeSelect, id: "brigade-call-code" },
+    { elem: ui.startBtn, id: "dispatch-shift-btn" },
+    { elem: ui.canvas, id: "game-canvas" },
+    { elem: ui.ledgerTable, id: "brigade-ledger-body" }
+  ];
+
+  const missing = requiredElements.filter(function (item) {
+    return !item.elem;
+  }).map(function (item) {
+    return item.id;
+  });
+
+  if (missing.length) {
+    window.AZOTBootFault = {
+      at: Date.now(),
+      location: "dispatch-desk",
+      missing: missing
+    };
+    console.error("Не удалось инициализировать интерфейс: " + missing.join(", "));
+    return;
+  }
+
+  const warehouse = {
+    lines: {
       "bulk-lane": {
         label: "Паллетный ряд",
         shortLabel: "Паллеты",
-        boardTag: "PLT-17",
-        targetPoints: 160,
+        tag: "PLT-17",
+        scoreGoal: 400,
         planNote: "не просадить поток паллет",
-        issueLimitNote: "допускается до трёх потерь по участку",
-        shiftRoute: "окно перебора",
-        launchBrief: "держать паллетный поток без пересорта",
-        faultStamp: "Паллетная линия не подняла смену"
+        rules: "допускается до трёх потерь по участку",
+        handoverPoint: "окно перебора",
+        briefing: "держать паллетный поток без пересорта",
+        errorMsg: "Паллетная линия не подняла смену"
       },
       "rush-dock": {
         label: "Экспресс-ворота",
         shortLabel: "Экспресс",
-        boardTag: "EXP-04",
-        targetPoints: 180,
+        tag: "EXP-04",
+        scoreGoal: 180,
         planNote: "не сорвать срочные окна",
-        issueLimitNote: "просрочка срочных недопустима",
-        shiftRoute: "стол Климова",
-        launchBrief: "держать срочные окна без просадки",
-        faultStamp: "Экспресс-ворота потеряли пульт смены"
+        rules: "просрочка срочных заказов недопустима",
+        handoverPoint: "стол Климова",
+        briefing: "держать срочные окна без просадки",
+        errorMsg: "Экспресс-ворота потеряли пульт смены"
       },
       "fragile-bay": {
         label: "Хрупкий ряд",
         shortLabel: "Хрупкий",
-        boardTag: "FRG-09",
-        targetPoints: 150,
+        tag: "FRG-09",
+        scoreGoal: 150,
         planNote: "сдать хрупкий товар без боя",
-        issueLimitNote: "бой хрупкого считается браком смены",
-        shiftRoute: "контрольный стол Ланиной",
-        launchBrief: "закрыть хрупкий ряд без боя и возвратов",
-        faultStamp: "Хрупкий ряд остался без игрового поля"
+        rules: "бой хрупкого считается браком смены",
+        handoverPoint: "контрольный стол Ланиной",
+        briefing: "закрыть хрупкий ряд без боя и возвратов",
+        errorMsg: "Хрупкий ряд остался без игрового поля"
       }
     },
-    brigades: {
-      "north-3": { label: "Север-3", lead: "Романов", handoverDesk: "окно А2", callSign: "N3" },
-      "azot-pack": { label: "Азот-комплект", lead: "Ведерникова", handoverDesk: "окно Б1", callSign: "AZP" },
-      "night-belt": { label: "Ночная лента", lead: "Чернов", handoverDesk: "ночной пост", callSign: "NBT" }
+    teams: {
+      "north-3": { label: "Север-3", lead: "Романов", deskLocation: "окно А2", callSign: "N3" },
+      "azot-pack": { label: "Азот-комплект", lead: "Ведерникова", deskLocation: "окно Б1", callSign: "AZP" },
+      "night-belt": { label: "Ночная лента", lead: "Чернов", deskLocation: "ночной пост", callSign: "NBT" }
     }
   };
 
-  const mustExistOnDesk = [
-    terminalScenes.dutyDesk,
-    terminalScenes.rackFloor,
-    terminalScenes.handoverDesk,
-    dutyDesk.badgeAliasInput,
-    dutyDesk.laneSelect,
-    dutyDesk.crewSelect,
-    dutyDesk.releaseShiftButton,
-    dutyDesk.shiftCanvas,
-    dutyDesk.brigadeTableBody
-  ];
-  const mustExistLabels = [
-    "azot-dispatch-scene",
-    "rack-floor-scene",
-    "shift-ledger-scene",
-    "picker-badge-input",
-    "azot-sector-code",
-    "brigade-call-code",
-    "dispatch-shift-btn",
-    "game-canvas",
-    "brigade-ledger-body"
-  ];
-  const missingDeskNodes = mustExistOnDesk.map(function (node, index) {
-    return node ? "" : mustExistLabels[index];
-  }).filter(function (label) {
-    return !!label;
-  });
+  const storage = window.AZOTStorage || {};
+  const audio = window.AZOTAudio || {};
+  const gameEngine = window.AZOTGame || {};
 
-  if (missingDeskNodes.length) {
-    window.AZOTBootFault = {
-      at: Date.now(),
-      post: "dispatch-desk",
-      missingNodes: missingDeskNodes,
-      note: "Пульт не поднялся полностью"
-    };
-    console.error("AZOT dispatch desk boot aborted. Missing nodes: " + missingDeskNodes.join(", "));
-    return;
-  }
-// инициализации на DOM сразу, чтобы не драться с async.
-// TODO: Переделать на EventListener когда перейдём на модули, но пока так.
-  const archiveDesk = window.AZOTStorage || {};  // хранилище смен
-  const depotSound = window.AZOTAudio || {};      //(может быть disabled)
-  const gameCore = window.AZOTGame || {};         // AzotShiftRunner
-
-  // Версия 3: требовала, чтобы в случае block canvas мы создавали новый.
-  // Раньше игра просто падала. На старых частый случай.
-  function restoreCanvasIfNeeded() {
-    if (!dutyDesk.shiftCanvas || !(dutyDesk.shiftCanvas instanceof HTMLCanvasElement)) return null;
-    
-    let ctx;
-    try {
-      ctx = dutyDesk.shiftCanvas.getContext("2d");
-      if (ctx) return dutyDesk.shiftCanvas;
-    } catch (blocked) {
-      // Браузер заблокировал canvas (Security policy)
-      console.warn("Canvas context blocked by browser policy");
-    }
-
-    if (!dutyDesk.shiftCanvas.parentNode) return null;
-    
-    // Пересоздаём canvas от нуля
-    const fallback = document.createElement("canvas");
-    fallback.id = dutyDesk.shiftCanvas.id || "game-canvas";
-    fallback.width = 1024;  // требования тз по жесткой рамке разрешения
-    fallback.height = 768;
-    fallback.style.cssText = dutyDesk.shiftCanvas.style.cssText || "";
-    
-    try {
-      dutyDesk.shiftCanvas.parentNode.replaceChild(fallback, dutyDesk.shiftCanvas);
-      dutyDesk.shiftCanvas = fallback;
-    } catch (replaceErr) {
-      console.error("Failed to replace canvas in DOM", replaceErr);
-      return null;
-    }
-    
-    try {
-      return fallback.getContext("2d") ? fallback : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  const pullDutyConsolePrefs = typeof archiveDesk.pullDutyConsolePrefs === "function"
-    ? archiveDesk.pullDutyConsolePrefs
-    : function () {
-        return { fontSize: 16, soundEnabled: true, sectorCode: "bulk-lane", brigadeCode: "north-3" };
-      };
-
-  const stashDutyConsolePrefs = typeof archiveDesk.stashDutyConsolePrefs === "function"
-    ? archiveDesk.stashDutyConsolePrefs
-    : function (nextPrefs) {
-        return nextPrefs;
-      };
-
-  const readCrewWatchboard = typeof archiveDesk.readCrewWatchboard === "function"
-    ? archiveDesk.readCrewWatchboard
-    : function () {
-        return [];
-      };
-
-  const logShiftToDutyJournal = typeof archiveDesk.logShiftToDutyJournal === "function"
-    ? archiveDesk.logShiftToDutyJournal
-    : function (summaryOrName, score) {
-        const name = summaryOrName && typeof summaryOrName === "object"
-          ? summaryOrName.pickerName
-          : summaryOrName;
-        const points = summaryOrName && typeof summaryOrName === "object"
-          ? summaryOrName.score
-          : score;
-
-        return {
-          top10: [{ name: name, score: points }],
-          rank: 1,
-          archiveSaved: false,
-          archiveMode: "screen-only",
-          archiveWasRepaired: false,
-          removedRows: 0,
-          shiftBadge: "Дежурный комплектовщик",
-          scoreCheck: "legacy-row",
-          expectedPoints: points,
-          reviewFlag: false,
-          reviewReason: "",
-          archiveIssue: "browser-blocked-ledger",
-          pickerRow: {
-            name: name,
-            score: points,
-            shiftPassport: summaryOrName && typeof summaryOrName === "object"
-              ? summaryOrName.shiftPassport
-              : buildDutySlip()
-          },
-          serviceNote: "",
-          shiftBoss: "",
-          auditDesk: "",
-          auditRowPinned: false
-        };
-      };
-
-  let terminalPrefs = pullDutyConsolePrefs();
-  let terminalAudio = depotSound.AudioManager
-    ? new depotSound.AudioManager(terminalPrefs.soundEnabled)
-    : { enabled: !!terminalPrefs.soundEnabled, toggle: function () { this.enabled = !this.enabled; return this.enabled; }, play: function () {}, ensureContext: function () {} };
-
-  let activeShiftRun = null;
-  let lastBadgeAlias = "";
-  let lastDutySlip = null;
-
-  function takeLaneCard(code) {
-    return azotDutyBoard.sectors[code] || azotDutyBoard.sectors["bulk-lane"];
-  }
-
-  function takeCrewCard(code) {
-    return azotDutyBoard.brigades[code] || azotDutyBoard.brigades["north-3"];
-  }
-
-  function buildDutySlip() {
-    const sectorCode = dutyDesk.laneSelect && azotDutyBoard.sectors[dutyDesk.laneSelect.value]
-      ? dutyDesk.laneSelect.value
-      : "bulk-lane";
-    const brigadeCode = dutyDesk.crewSelect && azotDutyBoard.brigades[dutyDesk.crewSelect.value]
-      ? dutyDesk.crewSelect.value
-      : "north-3";
-    const sectorMeta = takeLaneCard(sectorCode);
-    const brigadeMeta = takeCrewCard(brigadeCode);
+  function normalizeSettings(rawSettings) {
+    const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+    const line = warehouse.lines[source.line] ? source.line : source.sectorCode;
+    const team = warehouse.teams[source.team] ? source.team : source.brigadeCode;
 
     return {
-      sectorCode: sectorCode,
-      sectorLabel: sectorMeta.label,
-      sectorShortLabel: sectorMeta.shortLabel,
-      boardTag: sectorMeta.boardTag,
-      targetPoints: sectorMeta.targetPoints,
-      planNote: sectorMeta.planNote,
-      issueLimitNote: sectorMeta.issueLimitNote,
-      shiftRoute: sectorMeta.shiftRoute,
-      launchBrief: sectorMeta.launchBrief,
-      faultStamp: sectorMeta.faultStamp,
-      brigadeCode: brigadeCode,
-      brigadeLabel: brigadeMeta.label,
-      brigadeLead: brigadeMeta.lead,
-      brigadeCallSign: brigadeMeta.callSign,
-      handoverDesk: brigadeMeta.handoverDesk
+      fontSize: Math.max(12, Math.min(22, Number(source.fontSize) || 16)),
+      sound: source.sound !== false && source.soundEnabled !== false,
+      line: warehouse.lines[line] ? line : "bulk-lane",
+      team: warehouse.teams[team] ? team : "north-3"
     };
   }
 
-  function rememberDutySlip() {
-    const passport = buildDutySlip();
-    terminalPrefs.sectorCode = passport.sectorCode;
-    terminalPrefs.brigadeCode = passport.brigadeCode;
-    terminalPrefs = stashDutyConsolePrefs(terminalPrefs);
-    lastDutySlip = passport;
-    return passport;
+  function toStoragePrefs(nextSettings) {
+    const source = nextSettings && typeof nextSettings === "object" ? nextSettings : {};
+
+    return {
+      fontSize: Math.max(12, Math.min(22, Number(source.fontSize) || 16)),
+      soundEnabled: source.sound !== false,
+      sectorCode: warehouse.lines[source.line] ? source.line : "bulk-lane",
+      brigadeCode: warehouse.teams[source.team] ? source.team : "north-3"
+    };
   }
 
-  if (dutyDesk.laneSelect) {
-    dutyDesk.laneSelect.value = azotDutyBoard.sectors[terminalPrefs.sectorCode] ? terminalPrefs.sectorCode : "bulk-lane";
-  }
-  if (dutyDesk.crewSelect) {
-    dutyDesk.crewSelect.value = azotDutyBoard.brigades[terminalPrefs.brigadeCode] ? terminalPrefs.brigadeCode : "north-3";
-  }
-  lastDutySlip = buildDutySlip();
+  const loadSettings = typeof storage.pullDutyConsolePrefs === "function"
+    ? function () { return normalizeSettings(storage.pullDutyConsolePrefs()); }
+    : typeof storage.load === "function"
+      ? function () { return normalizeSettings(storage.load()); }
+      : function () { return normalizeSettings(null); };
 
-  function setConsoleTypeSize(size) {
-    const bounded = Math.max(12, Math.min(22, Number(size) || 16));
-    terminalPrefs.fontSize = bounded;
-    document.documentElement.style.setProperty("--ui-font-size", bounded + "px");
-    terminalPrefs = stashDutyConsolePrefs(terminalPrefs);
-  }
+  const saveSettings = typeof storage.stashDutyConsolePrefs === "function"
+    ? function (nextSettings) { return normalizeSettings(storage.stashDutyConsolePrefs(toStoragePrefs(nextSettings))); }
+    : typeof storage.save === "function"
+      ? function (nextSettings) { return normalizeSettings(storage.save(nextSettings)); }
+      : function (nextSettings) { return normalizeSettings(nextSettings); };
 
-  function buildSoundSwitchLabel() {
-    return terminalPrefs.soundEnabled ? "Звук: вкл" : "Звук: выкл";
-  }
+  const readLeaderboard = typeof storage.readCrewWatchboard === "function"
+    ? storage.readCrewWatchboard.bind(storage)
+    : typeof storage.getBoard === "function"
+      ? storage.getBoard.bind(storage)
+      : function () { return []; };
 
-  function paintSoundToggles() {
-    const label = buildSoundSwitchLabel();
+  const writeShiftResult = typeof storage.logShiftToDutyJournal === "function"
+    ? storage.logShiftToDutyJournal.bind(storage)
+    : typeof storage.record === "function"
+      ? storage.record.bind(storage)
+      : function (summaryOrName, maybeScore) {
+          const source = summaryOrName && typeof summaryOrName === "object" ? summaryOrName : null;
+          const name = source
+            ? (source.pickerName || source.workerName || source.name || "Игрок")
+            : (summaryOrName || "Игрок");
+          const score = Math.max(0, Number(source ? source.score : maybeScore) || 0);
 
-    if (dutyDesk.floorSoundButton) {
-      dutyDesk.floorSoundButton.textContent = label;
+          return {
+            top10: [{ name: name, score: score }],
+            rank: 1,
+            archiveSaved: false,
+            archiveMode: "screen-only",
+            archiveWasRepaired: false,
+            removedRows: 0,
+            pickerRow: {
+              name: name,
+              score: score,
+              shiftPassport: source && source.shiftPassport ? source.shiftPassport : null
+            },
+            shiftBadge: "Дежурный комплектовщик",
+            serviceNote: "",
+            reviewFlag: false,
+            reviewReason: "",
+            shiftBoss: "",
+            auditDesk: "",
+            auditRowPinned: false,
+            archiveIssue: "browser-blocked-ledger"
+          };
+        };
+
+  function ensureCanvas() {
+    if (!ui.canvas || !(ui.canvas instanceof HTMLCanvasElement)) {
+      return null;
     }
-    if (dutyDesk.dispatchSoundButton) {
-      dutyDesk.dispatchSoundButton.textContent = label;
+
+    try {
+      if (ui.canvas.getContext("2d")) {
+        return ui.canvas;
+      }
+    } catch (error) {}
+
+    if (!ui.canvas.parentNode) {
+      return null;
+    }
+
+    const newCanvas = document.createElement("canvas");
+    newCanvas.id = ui.canvas.id || "game-canvas";
+    newCanvas.width = 1024;
+    newCanvas.height = 768;
+    newCanvas.style.cssText = ui.canvas.style.cssText || "";
+
+    try {
+      ui.canvas.parentNode.replaceChild(newCanvas, ui.canvas);
+      ui.canvas = newCanvas;
+      return newCanvas.getContext("2d") ? newCanvas : null;
+    } catch (error) {
+      return null;
     }
   }
 
-  function beepDutyKey() {
-    if (!terminalPrefs.soundEnabled || !terminalAudio || typeof terminalAudio.play !== "function") {
+  let settings = loadSettings();
+  let soundEngine = audio.Engine
+    ? new audio.Engine(settings.sound)
+    : {
+        on: !!settings.sound,
+        toggle: function () { this.on = !this.on; return this.on; },
+        play: function () {},
+        init: function () {},
+        startAmbient: function () {},
+        stopAmbient: function () {}
+      };
+
+  let currentGame = null;
+  let lastWorkerName = "";
+  let lastShiftInfo = null;
+
+  function getLineConfig(code) {
+    return warehouse.lines[code] || warehouse.lines["bulk-lane"];
+  }
+
+  function getBrigadeConfig(code) {
+    return warehouse.teams[code] || warehouse.teams["north-3"];
+  }
+
+  function makeShiftInfo() {
+    const lineCode = ui.lineSelect && warehouse.lines[ui.lineSelect.value] ? ui.lineSelect.value : "bulk-lane";
+    const teamCode = ui.brigadeSelect && warehouse.teams[ui.brigadeSelect.value] ? ui.brigadeSelect.value : "north-3";
+    const line = getLineConfig(lineCode);
+    const team = getBrigadeConfig(teamCode);
+
+    return {
+      line: lineCode,
+      lineName: line.label,
+      lineShort: line.shortLabel,
+      tag: line.tag,
+      score: line.scoreGoal,
+      plan: line.planNote,
+      rules: line.rules,
+      handover: line.handoverPoint,
+      briefing: line.briefing,
+      faultMsg: line.errorMsg,
+      team: teamCode,
+      teamName: team.label,
+      lead: team.lead,
+      callSign: team.callSign,
+      handoverDesk: team.deskLocation
+    };
+  }
+
+  function makeShiftPassport(info) {
+    const source = info || makeShiftInfo();
+
+    return {
+      sectorCode: source.line,
+      sectorLabel: source.lineName,
+      sectorShortLabel: source.lineShort,
+      boardTag: source.tag,
+      brigadeCode: source.team,
+      brigadeLabel: source.teamName,
+      brigadeLead: source.lead,
+      brigadeCallSign: source.callSign,
+      handoverDesk: source.handoverDesk,
+      targetPoints: source.score,
+      planNote: source.plan,
+      issueLimitNote: source.rules,
+      launchBrief: source.briefing,
+      faultStamp: source.faultMsg
+    };
+  }
+
+  function rememberShift() {
+    const info = makeShiftInfo();
+    settings.line = info.line;
+    settings.team = info.team;
+    settings = saveSettings(settings);
+    lastShiftInfo = info;
+    return info;
+  }
+
+  if (ui.lineSelect) {
+    ui.lineSelect.value = warehouse.lines[settings.line] ? settings.line : "bulk-lane";
+  }
+  if (ui.brigadeSelect) {
+    ui.brigadeSelect.value = warehouse.teams[settings.team] ? settings.team : "north-3";
+  }
+  lastShiftInfo = makeShiftInfo();
+
+  function changeFontSize(size) {
+    const clamped = Math.max(12, Math.min(22, Number(size) || 16));
+    settings.fontSize = clamped;
+    document.documentElement.style.setProperty("--ui-font-size", clamped + "px");
+    settings = saveSettings(settings);
+  }
+
+  function getSoundLabel() {
+    return settings.sound ? "Звук: вкл" : "Звук: выкл";
+  }
+
+  function updateSoundButtons() {
+    const label = getSoundLabel();
+    if (ui.soundBtnFloor) {
+      ui.soundBtnFloor.textContent = label;
+    }
+    if (ui.soundBtnDispatch) {
+      ui.soundBtnDispatch.textContent = label;
+    }
+  }
+
+  function beep() {
+    if (!settings.sound || !soundEngine || typeof soundEngine.play !== "function") {
       return;
     }
-
-    terminalAudio.play("click");
+    soundEngine.play("click");
   }
 
-  function showDeskMode(nextMode) {
-    Object.keys(terminalScenes).forEach(function (key) {
-      const node = terminalScenes[key];
-      const show = key === nextMode;
-      node.classList.toggle("active", show);
-      node.setAttribute("aria-hidden", show ? "false" : "true");
+  function switchScreen(nextScreen) {
+    Object.keys(screens).forEach(function (key) {
+      const elem = screens[key];
+      const show = key === nextScreen;
+      elem.classList.toggle("active", show);
+      elem.setAttribute("aria-hidden", show ? "false" : "true");
     });
   }
 
-  function formatDutyTimer(secondsLeft) {
-    const whole = Math.max(0, Math.ceil(secondsLeft));
-    const minutes = String(Math.floor(whole / 60)).padStart(2, "0");
-    const seconds = String(whole % 60).padStart(2, "0");
-    return minutes + ":" + seconds;
+  function formatTime(seconds) {
+    const whole = Math.max(0, Math.ceil(seconds));
+    const mins = String(Math.floor(whole / 60)).padStart(2, "0");
+    const secs = String(whole % 60).padStart(2, "0");
+    return mins + ":" + secs;
   }
 
-  function paintReleaseShiftButton() {
-    const slip = buildDutySlip();
-    const hasName = dutyDesk.badgeAliasInput.value.trim().length > 0;
+  function updateStartButton() {
+    const info = makeShiftInfo();
+    const hasName = ui.workerInput.value.trim().length > 0;
 
-    dutyDesk.releaseShiftButton.disabled = !hasName;
-    dutyDesk.releaseShiftButton.textContent = hasName
-      ? "Открыть смену · " + slip.boardTag + " / " + slip.brigadeCallSign
+    ui.startBtn.disabled = !hasName;
+    ui.startBtn.textContent = hasName
+      ? "Открыть смену · " + info.tag + " / " + info.callSign
       : "Открыть смену";
   }
 
-  function paintUpperBoard(snapshot) {
-    if (dutyDesk.boardBadge) {
-      dutyDesk.boardBadge.textContent = snapshot.pickerName;
+  function updateHUD(state) {
+    const shift = state && (state.shiftPassport || state.shiftInfo) ? (state.shiftPassport || state.shiftInfo) : {};
+
+    if (ui.workerBadge) {
+      ui.workerBadge.textContent = state.workerName || state.pickerName || "-";
     }
-    if (dutyDesk.boardLane) {
-      const sectorLabel = snapshot.shiftPassport && snapshot.shiftPassport.boardTag
-        ? snapshot.shiftPassport.boardTag
-        : "Паллеты";
-      dutyDesk.boardLane.textContent = snapshot.testMode ? "TEST · " + sectorLabel : sectorLabel;
+    if (ui.lineBadge) {
+      const label = shift.sectorLabel || shift.boardTag || shift.tag || "Паллетный ряд";
+      ui.lineBadge.textContent = state.testMode ? "TEST · " + label : label;
     }
-    if (dutyDesk.boardTimer) {
-      dutyDesk.boardTimer.textContent = snapshot.testMode ? "∞" : formatDutyTimer(snapshot.timeLeft);
+    if (ui.timer) {
+      ui.timer.textContent = state.testMode ? "∞" : formatTime(state.timeLeft);
     }
-    if (dutyDesk.boardScore) {
-      dutyDesk.boardScore.textContent = String(snapshot.score);
+    if (ui.scoreBoard) {
+      ui.scoreBoard.textContent = String(state.score);
     }
-    if (dutyDesk.boardLives) {
-      dutyDesk.boardLives.textContent = String(snapshot.lives);
+    if (ui.livesBoard) {
+      ui.livesBoard.textContent = String(state.lives);
     }
   }
 
-  function clearCrewBoard() {
-    while (dutyDesk.brigadeTableBody.firstChild) {
-      dutyDesk.brigadeTableBody.removeChild(dutyDesk.brigadeTableBody.firstChild);
+  function clearLedger() {
+    while (ui.ledgerTable.firstChild) {
+      ui.ledgerTable.removeChild(ui.ledgerTable.firstChild);
     }
   }
 
-  function drawCrewBoardRow(place, name, score, rowClass) {
+  function addLedgerRow(place, name, score, className) {
     const row = document.createElement("tr");
     const placeCell = document.createElement("td");
     const nameCell = document.createElement("td");
     const scoreCell = document.createElement("td");
 
-    if (rowClass) {
-      row.className = rowClass;
+    if (className) {
+      row.className = className;
     }
 
     placeCell.textContent = String(place);
@@ -380,357 +398,273 @@
     row.appendChild(placeCell);
     row.appendChild(nameCell);
     row.appendChild(scoreCell);
-    dutyDesk.brigadeTableBody.appendChild(row);
+    ui.ledgerTable.appendChild(row);
   }
 
-  function paintCrewBoard(journalSlip) {
-    const board = journalSlip && Array.isArray(journalSlip.top10)
-      ? journalSlip.top10
-      : readCrewWatchboard().slice(0, 10);
-    const activeCrewCard = takeCrewCard(dutyDesk.crewSelect ? dutyDesk.crewSelect.value : "");
+  function normalizeShiftStats(rawStats) {
+    const source = rawStats && typeof rawStats === "object" ? rawStats : {};
 
-    clearCrewBoard();
+    return {
+      ordinaryPicked: Math.max(0, Number(source.ordinaryPicked) || Number(source.regular) || 0),
+      urgentPicked: Math.max(0, Number(source.urgentPicked) || Number(source.urgent) || 0),
+      fragilePicked: Math.max(0, Number(source.fragilePicked) || Number(source.fragile) || 0),
+      falls: Math.max(0, Number(source.falls) || 0),
+      cartHits: Math.max(0, Number(source.cartHits) || 0),
+      cartCargoLosses: Math.max(0, Number(source.cartCargoLosses) || Number(source.cartLosses) || 0),
+      cartFragileLosses: Math.max(0, Number(source.cartFragileLosses) || 0),
+      urgentExpired: Math.max(0, Number(source.urgentExpired) || 0),
+      fragileBroken: Math.max(0, Number(source.fragileBroken) || Number(source.fragileBreaks) || 0),
+      boostsUsed: Math.max(0, Number(source.boostsUsed) || Number(source.boosts) || 0)
+    };
+  }
 
-    if (!board.length) {
-      drawCrewBoardRow("—", "Журнал " + activeCrewCard.callSign + " пуст", 0, "");
+  function mergeShiftInfo(summary, journalSlip) {
+    const fallback = makeShiftPassport(lastShiftInfo || makeShiftInfo());
+    const source = (journalSlip && journalSlip.pickerRow && journalSlip.pickerRow.shiftPassport) ||
+      (summary && (summary.shiftPassport || summary.shiftInfo)) ||
+      {};
+
+    return {
+      sectorLabel: source.sectorLabel || fallback.sectorLabel,
+      boardTag: source.boardTag || source.tag || fallback.boardTag,
+      brigadeLabel: source.brigadeLabel || fallback.brigadeLabel,
+      brigadeLead: source.brigadeLead || fallback.brigadeLead,
+      brigadeCallSign: source.brigadeCallSign || fallback.brigadeCallSign,
+      handoverDesk: source.handoverDesk || fallback.handoverDesk,
+      targetPoints: Number(source.targetPoints) || fallback.targetPoints,
+      planNote: source.planNote || source.shiftRule || fallback.planNote,
+      launchBrief: source.launchBrief || fallback.launchBrief,
+      issueLimitNote: source.issueLimitNote || fallback.issueLimitNote
+    };
+  }
+
+  function evaluateTest(summary, passport, rawStats) {
+    const stats = normalizeShiftStats(rawStats);
+    const pickedTotal = stats.ordinaryPicked + stats.urgentPicked + stats.fragilePicked;
+    const incidents = stats.falls + stats.cartHits + stats.urgentExpired + stats.fragileBroken;
+    const laneLabel = passport && passport.sectorLabel ? passport.sectorLabel : "участке";
+    const passed = pickedTotal >= 6 && incidents <= 1;
+
+    return {
+      title: passed ? "Тест пройден" : "Тест завершён",
+      badge: passed ? "Испытание пройдено" : "Тестовый прогон",
+      report: "Тест на " + laneLabel + ": собрано " + pickedTotal + " заказов, инцидентов " + incidents + "."
+    };
+  }
+
+  function showLedger(record) {
+    clearLedger();
+
+    const rows = Array.isArray(record && record.top10) ? record.top10 : readLeaderboard();
+
+    if (!Array.isArray(rows) || !rows.length) {
+      addLedgerRow("-", "Пока нет результатов", 0);
       return;
     }
 
-    if (journalSlip && journalSlip.rank > 10 && journalSlip.pickerRow) {
-      board.slice(0, 9).forEach(function (entry, index) {
-        drawCrewBoardRow(index + 1, entry.name, entry.score, "");
-      });
-      drawCrewBoardRow(10, journalSlip.pickerRow.name, journalSlip.pickerRow.score, "brigade-row-current");
-      return;
-    }
-
-    board.slice(0, 10).forEach(function (entry, index) {
-      const isCurrentRow = journalSlip &&
-        journalSlip.rank === index + 1 &&
-        journalSlip.pickerRow &&
-        journalSlip.pickerRow.name === entry.name &&
-        journalSlip.pickerRow.score === entry.score;
-
-      drawCrewBoardRow(index + 1, entry.name, entry.score, isCurrentRow ? "brigade-row-current" : "");
+    rows.slice(0, 10).forEach(function (row, index) {
+      const name = row && (row.name || row.pickerName) ? (row.name || row.pickerName) : "Игрок";
+      const score = Math.max(0, Number(row && row.score) || 0);
+      addLedgerRow(index + 1, name, score);
     });
+
+    if (record && record.rank > 10 && record.pickerRow) {
+      addLedgerRow("...", record.pickerRow.name || "Игрок", Math.max(0, Number(record.pickerRow.score) || 0));
+    }
   }
 
-  function paintFreezeGate(paused) {
-    if (!dutyDesk.freezeGate) {
+  function setRankLine(message) {
+    if (!message) {
+      ui.rankLine.textContent = "";
+      ui.rankLine.classList.add("hidden");
       return;
     }
 
-    dutyDesk.freezeGate.classList.toggle("hidden", !paused);
-    dutyDesk.freezeGate.setAttribute("aria-hidden", paused ? "false" : "true");
+    ui.rankLine.textContent = message;
+    ui.rankLine.classList.remove("hidden");
+  }
 
-    if (dutyDesk.freezeShiftButton) {
-      dutyDesk.freezeShiftButton.textContent = paused ? "Продолжить" : "Пауза";
+  function showPauseOverlay(paused) {
+    ui.pauseOverlay.classList.toggle("hidden", !paused);
+    ui.pauseOverlay.setAttribute("aria-hidden", paused ? "false" : "true");
+    if (ui.pauseBtn) {
+      ui.pauseBtn.textContent = paused ? "Продолжить" : "Пауза";
     }
   }
 
-  function retireActiveRun() {
-    if (!activeShiftRun) {
+  function stopGame() {
+    if (!currentGame) {
       return;
     }
-
-    activeShiftRun.stop();
-    activeShiftRun = null;
+    currentGame.stop();
+    currentGame = null;
   }
 
-  function readBadgeAlias() {
-    return dutyDesk.badgeAliasInput.value.trim().slice(0, 16);
+  function getWorkerName() {
+    return ui.workerInput.value.trim().slice(0, 16);
   }
 
-  // Если линия не поднялась, оставляем маршрутный инцидент для мастера.
-  function routeDeskFault(message) {
-    const slip = buildDutySlip();
-    const faultTicket = slip.boardTag + "-" + slip.brigadeCallSign + "-" + String(Date.now()).slice(-5);
-    const routedMessage = "[" + faultTicket + "] " + slip.faultStamp + ". " + message + " Сообщите на " + slip.shiftRoute + ".";
-    const dutyIncidentQueue = Array.isArray(window.AZOTDutyIncidentQueue)
-      ? window.AZOTDutyIncidentQueue
-      : [];
+  function reportError(errorText) {
+    const info = makeShiftInfo();
+    const fullMessage = info.faultMsg + ". " + errorText + " Сообщите на " + info.handover + ".";
 
-    console.error(routedMessage);
-    dutyIncidentQueue.push({
-      ticket: faultTicket,
-      openedAt: Date.now(),
-      lane: slip.boardTag,
-      brigade: slip.brigadeCallSign,
-      route: slip.shiftRoute,
-      handoverDesk: slip.handoverDesk,
-      message: routedMessage
-    });
-    window.AZOTDutyIncidentQueue = dutyIncidentQueue.slice(-12);
-    window.AZOTLastDeskFault = {
+    window.AZOTLastError = {
       at: Date.now(),
-      ticket: faultTicket,
-      lane: slip.boardTag,
-      brigade: slip.brigadeCallSign,
-      message: routedMessage
+      line: info.tag,
+      team: info.callSign,
+      message: fullMessage
     };
 
-    showDeskMode("handoverDesk");
-    terminalScenes.handoverDesk.scrollTop = 0;
-
-    if (dutyDesk.handoverHeadline) {
-      dutyDesk.handoverHeadline.textContent = "Смена не запущена";
-    }
-
-    if (dutyDesk.handoverBody) {
-      dutyDesk.handoverBody.textContent = routedMessage;
-    }
-
-    if (dutyDesk.handoverRankLine) {
-      dutyDesk.handoverRankLine.classList.add("hidden");
-    }
-
-    paintCrewBoard(null);
+    switchScreen("summary");
+    screens.summary.scrollTop = 0;
+    ui.summaryTitle.textContent = "Смена не запущена";
+    ui.summaryBody.textContent = fullMessage;
+    setRankLine("");
+    showLedger(null);
   }
 
-  function liftShiftFacts(summary) {
-    const source = summary && summary.stats && typeof summary.stats === "object"
-      ? summary.stats
-      : {};
-
-    return {
-      ordinaryPicked: Number(source.ordinaryPicked) || 0,
-      urgentPicked: Number(source.urgentPicked) || 0,
-      fragilePicked: Number(source.fragilePicked) || 0,
-      falls: Number(source.falls) || 0,
-      cartHits: Number(source.cartHits) || 0,
-      cartCargoLosses: Number(source.cartCargoLosses) || 0,
-      cartFragileLosses: Number(source.cartFragileLosses) || 0,
-      urgentExpired: Number(source.urgentExpired) || 0,
-      fragileBroken: Number(source.fragileBroken) || 0,
-      boostsUsed: Number(source.boostsUsed) || 0
-    };
-  }
-
-  function rebuildDutySlip(summary, journalSlip) {
-    const fallbackPassport = lastDutySlip || buildDutySlip();
-    const rawPassport = summary && summary.shiftPassport
-      ? summary.shiftPassport
-      : journalSlip && journalSlip.pickerRow && journalSlip.pickerRow.shiftPassport
-        ? journalSlip.pickerRow.shiftPassport
-        : fallbackPassport;
-    const sectorCard = takeLaneCard(rawPassport && rawPassport.sectorCode);
-    const brigadeCard = takeCrewCard(rawPassport && rawPassport.brigadeCode);
-
-    return {
-      sectorCode: rawPassport && rawPassport.sectorCode ? rawPassport.sectorCode : fallbackPassport.sectorCode,
-      sectorLabel: rawPassport && rawPassport.sectorLabel ? rawPassport.sectorLabel : sectorCard.label,
-      sectorShortLabel: rawPassport && rawPassport.sectorShortLabel ? rawPassport.sectorShortLabel : sectorCard.shortLabel,
-      boardTag: rawPassport && rawPassport.boardTag ? rawPassport.boardTag : sectorCard.boardTag,
-      targetPoints: typeof rawPassport.targetPoints === "number" && rawPassport.targetPoints > 0
-        ? rawPassport.targetPoints
-        : sectorCard.targetPoints,
-      planNote: rawPassport && rawPassport.planNote ? rawPassport.planNote : sectorCard.planNote,
-      issueLimitNote: rawPassport && rawPassport.issueLimitNote ? rawPassport.issueLimitNote : sectorCard.issueLimitNote,
-      shiftRoute: rawPassport && rawPassport.shiftRoute ? rawPassport.shiftRoute : sectorCard.shiftRoute,
-      launchBrief: rawPassport && rawPassport.launchBrief ? rawPassport.launchBrief : sectorCard.launchBrief,
-      faultStamp: rawPassport && rawPassport.faultStamp ? rawPassport.faultStamp : sectorCard.faultStamp,
-      brigadeCode: rawPassport && rawPassport.brigadeCode ? rawPassport.brigadeCode : fallbackPassport.brigadeCode,
-      brigadeLabel: rawPassport && rawPassport.brigadeLabel ? rawPassport.brigadeLabel : brigadeCard.label,
-      brigadeLead: rawPassport && rawPassport.brigadeLead ? rawPassport.brigadeLead : brigadeCard.lead,
-      brigadeCallSign: rawPassport && rawPassport.brigadeCallSign ? rawPassport.brigadeCallSign : brigadeCard.callSign,
-      handoverDesk: rawPassport && rawPassport.handoverDesk ? rawPassport.handoverDesk : brigadeCard.handoverDesk
-    };
-  }
-
-  // По этому тексту мастер видит, чем закончилась смена и куда ушел хвост.
   function composeDutyHandover(summary, journalSlip) {
-    const stats = liftShiftFacts(summary);
-    const passport = rebuildDutySlip(summary, journalSlip);
+    const stats = normalizeShiftStats(summary && summary.stats);
+    const passport = mergeShiftInfo(summary, journalSlip);
     const notes = [];
 
-    if (passport && passport.sectorLabel && passport.brigadeLabel) {
-      notes.push(
-        "Смена принята на линии " + passport.boardTag + " (" + passport.sectorLabel + "), бригада " + passport.brigadeLabel +
-        " [" + passport.brigadeCallSign + "], старший " + passport.brigadeLead + ", сдача через " + passport.handoverDesk + "."
-      );
-    }
+    notes.push(
+      "Смена по линии " + passport.boardTag + " (" + passport.sectorLabel + "), бригада " +
+      passport.brigadeLabel + " [" + passport.brigadeCallSign + "], старший " +
+      passport.brigadeLead + ", сдача через " + passport.handoverDesk + "."
+    );
 
-    if (typeof passport.targetPoints === "number") {
+    if (!summary.testMode) {
       if (summary.score >= passport.targetPoints) {
         notes.push("План участка закрыт: " + summary.score + " из " + passport.targetPoints + " очков.");
       } else {
-        notes.push(
-          "План участка не закрыт: " + summary.score + " из " + passport.targetPoints +
-          " очков. Основная задача смены была — " + passport.planNote + ". На запуске линии держали правило: " + passport.launchBrief + "."
-        );
+        notes.push("План участка не закрыт: " + summary.score + " из " + passport.targetPoints + " очков.");
       }
-    }
-
-    if (summary.score >= passport.targetPoints + 35) {
-      notes.push("Линия вышла в запас по очкам и может закрыть соседний поток без пересменки.");
-    } else if (summary.score > 0 && summary.score < passport.targetPoints - 45) {
-      notes.push("Смена сильно просела относительно планки, мастеру стоит проверить стартовый разбор линии и расклад тележек.");
     }
 
     if (stats.urgentPicked || stats.urgentExpired) {
       notes.push("Срочные заказы: собрано " + stats.urgentPicked + ", просрочено " + stats.urgentExpired + ".");
     }
-
     if (stats.fragilePicked || stats.fragileBroken || stats.cartFragileLosses) {
       notes.push("Хрупкие заказы: доставлено " + stats.fragilePicked + ", разбито " + stats.fragileBroken + ", увезено тележками " + stats.cartFragileLosses + ".");
     }
-
     if (stats.falls || stats.cartHits || stats.cartCargoLosses) {
       notes.push("Потери смены: падений " + stats.falls + ", ударов тележкой " + stats.cartHits + ", утрачено заказов " + stats.cartCargoLosses + ".");
     }
-
-    if (stats.boostsUsed) {
-      notes.push("Энергетик подбирали " + stats.boostsUsed + " раз.");
-    }
-
     if (journalSlip && journalSlip.shiftBadge) {
       notes.push("Статус смены: " + journalSlip.shiftBadge + ".");
     }
-
     if (journalSlip && journalSlip.serviceNote) {
-      notes.push("Служебная отметка смены: " + journalSlip.serviceNote + ".");
+      notes.push("Служебная отметка: " + journalSlip.serviceNote + ".");
     }
-
-    if (!journalSlip || !journalSlip.reviewFlag) {
-      if (stats.urgentExpired === 0 && stats.fragileBroken === 0 && stats.cartHits === 0 && stats.falls === 0) {
-        notes.push("Смена прошла чисто: линия не дала ни травмы, ни просрочки, ни боя.");
-      }
-    }
-
     if (journalSlip && journalSlip.reviewFlag && journalSlip.reviewReason) {
-      if (journalSlip.shiftBoss && journalSlip.auditDesk) {
-        notes.push("Нужно внимание мастера: " + journalSlip.reviewReason + ". Проверка у " + journalSlip.shiftBoss + ", сдача на " + journalSlip.auditDesk + ".");
-      } else if (journalSlip.shiftBoss) {
-        notes.push("Нужно внимание мастера: " + journalSlip.reviewReason + ". Проверка у " + journalSlip.shiftBoss + ".");
-      } else {
-        notes.push("Нужно внимание мастера: " + journalSlip.reviewReason + ".");
-      }
-    }
-
-    if (passport && passport.issueLimitNote && (stats.falls || stats.cartHits || stats.cartCargoLosses || stats.urgentExpired || stats.fragileBroken)) {
-      notes.push("Для этого участка действует правило: " + passport.issueLimitNote + ".");
-    }
-
-    if (journalSlip && journalSlip.archiveWasRepaired) {
-      notes.push("Журнал бригады пришлось чинить перед записью новой смены.");
-    }
-
-    if (journalSlip && journalSlip.archiveMode === "trimmed-archive") {
-      notes.push("Архив урезан до сокращённой версии, иначе браузер не принимал запись.");
-    } else if (journalSlip && journalSlip.archiveMode === "watchlist-top10") {
-      notes.push("В браузере поместился только сторожевой топ-10 смен.");
-    } else if (journalSlip && journalSlip.archiveMode === "screen-only") {
-      notes.push("Браузер не дал сохранить журнал, итог остался только на экране.");
-    }
-
-    if (journalSlip && journalSlip.removedRows > 0) {
-      notes.push("Из архива вычищены " + journalSlip.removedRows + " битых или лишних строк.");
-    }
-
-    if (journalSlip && journalSlip.auditRowPinned) {
-      notes.push("Служебную смену с замечанием оставили в архиве принудительно, даже вне обычного лимита.");
-    }
-
-    if (journalSlip && journalSlip.archiveIssue === "ledger-quarantined") {
-      notes.push("Старый битый архив убран в карантин, журнал собран заново.");
-    } else if (journalSlip && journalSlip.archiveIssue === "legacy-ledger-migrated") {
-      notes.push("Журнал со старого формата подтянули в новый архив смены без потери таблицы.");
-    } else if (journalSlip && journalSlip.archiveIssue === "archive-trimmed-for-browser") {
-      notes.push("Браузер отказался держать полный архив и принял только облегчённую версию.");
-    } else if (journalSlip && journalSlip.archiveIssue === "only-top10-fits") {
-      notes.push("После переполнения удалось удержать только верхушку рейтинга.");
-    } else if (journalSlip && journalSlip.archiveIssue === "double-handover-pruned") {
-      notes.push("Из журнала сняты дубли смены, которые обычно остаются после повторной сдачи.");
-    }
-
-    if (!notes.length) {
-      notes.push("Смена закрыта без служебных замечаний.");
+      notes.push("Нужно внимание мастера: " + journalSlip.reviewReason + ".");
     }
 
     return notes.join(" ");
   }
 
-  function launchDutyRun() {
-    const workerName = readBadgeAlias();
-    const shiftPassport = rememberDutySlip();
-    const gameDef = gameCore.AzotShiftRunner || window.AZOTShiftRunner;
-    const cvs = restoreCanvasIfNeeded();
+  function startShift() {
+    const name = getWorkerName();
+    const info = rememberShift();
+    const shiftPassport = makeShiftPassport(info);
+    const engine = gameEngine.AzotShiftRunner || window.AZOTShiftRunner;
+    const canvas = ensureCanvas();
 
-    // Запрет начала смены без имени, чтобы не было анонимных записей в журнале и рейтинге. 
-    // смена не стартует и обязывает работнику ввести имя.
-    if (!workerName) {
-      paintReleaseShiftButton();
+    if (!name) {
+      updateStartButton();
+      return;
+    }
+    if (typeof engine !== "function") {
+      reportError("Игровой движок не загрузился.");
+      return;
+    }
+    if (!canvas) {
+      reportError("Canvas недоступен.");
       return;
     }
 
-    // Избегает плохой подгрузки движка — может быть проблема с сетью или браузером
-    if (typeof gameDef !== "function") {
-      routeDeskFault("Игровой модуль не загрузился. Обновите страницу.");
-      return;
+    stopGame();
+    lastWorkerName = name;
+    showPauseOverlay(false);
+    switchScreen("game");
+
+    if (soundEngine && typeof soundEngine.init === "function") {
+      soundEngine.init();
     }
+    beep();
 
-    // Canvas может быть недоступен из-за политик безопасности браузера
-    if (!cvs) {
-      routeDeskFault("Игровое поле не доступно. Перезагрузите страницу или пjпробуйте другой 6pаузер.");
-      return;
-    }
-
-    retireActiveRun();
-    lastBadgeAlias = workerName;
-    paintFreezeGate(false);
-    showDeskMode("rackFloor");
-
-    if (terminalAudio && typeof terminalAudio.ensureContext === "function") {
-      terminalAudio.ensureContext();
-    }
-    beepDutyKey();
-
-    activeShiftRun = new gameDef(dutyDesk.shiftCanvas, {
-      audio: terminalAudio,
+    currentGame = new engine(ui.canvas, {
+      audio: soundEngine,
       shiftPassport: shiftPassport,
-      onShiftBoardUpdate: paintUpperBoard,
-      onPauseChange: paintFreezeGate,
-      onFinish: closeDutyRun
+      shiftInfo: shiftPassport,
+      onShiftBoardUpdate: updateHUD,
+      onStateUpdate: updateHUD,
+      onPauseChange: showPauseOverlay,
+      onPauseToggle: showPauseOverlay,
+      onFinish: endShift,
+      onEnd: endShift
     });
 
-    activeShiftRun.start(workerName, workerName.toLowerCase() === "tester");
+    currentGame.start(name, name.toLowerCase() === "tester");
   }
 
-  function closeDutyRun(summary) {
-    let journalSlip;
+  function endShift(result) {
+    const summary = result && typeof result === "object"
+      ? result
+      : {
+          pickerName: lastWorkerName || getWorkerName() || "Игрок",
+          score: 0,
+          testMode: false,
+          lives: 0,
+          reason: "complete",
+          shiftPassport: makeShiftPassport(lastShiftInfo || makeShiftInfo()),
+          stats: {}
+        };
+    let journalSlip = null;
 
-    showDeskMode("handoverDesk");
-    terminalScenes.handoverDesk.scrollTop = 0;
+    currentGame = null;
+    switchScreen("summary");
+    screens.summary.scrollTop = 0;
 
     if (summary.testMode) {
-      dutyDesk.handoverHeadline.textContent = "Tестовая смена завершена: " + summary.score + " очков";
-      dutyDesk.handoverBody.textContent = composeDutyHandover(summary, {
-        shiftBadge: "Тестовый прогон"
-      }) + " Тестовый прогон в таблицу не записывается.";
-      dutyDesk.handoverRankLine.classList.add("hidden");
-      paintCrewBoard(null);
+      const test = evaluateTest(summary, summary.shiftPassport || summary.shiftInfo, summary.stats);
+      ui.summaryTitle.textContent = test.title + ": " + summary.score + " очков";
+      ui.summaryBody.textContent = test.report + " Тестовый прогон не записывается в таблицу.";
+      setRankLine("");
+      showLedger(null);
       return;
     }
 
     if (summary.reason === "canvas-error") {
-      dutyDesk.handoverHeadline.textContent = "Смена не стартовала: Tерминал не oткpыл игровое поле";
-      dutyDesk.handoverBody.textContent = "Браузер не дал создать canvas. ПерезагрузNте страницу или попробуйте другой браузер.";
-      dutyDesk.handoverRankLine.classList.add("hidden");
-      paintCrewBoard(null);
+      ui.summaryTitle.textContent = "Смена не стартовала: терминал не открыл игровое поле";
+      ui.summaryBody.textContent = "Браузер не дал создать canvas. Перезагрузите страницу и попробуйте снова.";
+      setRankLine("");
+      showLedger(null);
       return;
     }
 
     if (summary.reason === "fall") {
-      dutyDesk.handoverHeadline.textContent = "Cмена прервана из-за травм: " + summary.score + " очков";
+      ui.summaryTitle.textContent = "Смена прервана из-за падений: " + summary.score + " очков";
     } else if (summary.reason === "timeout") {
-      dutyDesk.handoverHeadline.textContent = "Cмена закрыта по таймеру: " + summary.score + " очков";
+      ui.summaryTitle.textContent = "Смена закрыта по таймеру: " + summary.score + " очков";
     } else {
-      dutyDesk.handoverHeadline.textContent = "Cмена сдана: " + summary.score + " oчков";
+      ui.summaryTitle.textContent = "Смена сдана: " + summary.score + " очков";
     }
 
-    journalSlip = logShiftToDutyJournal(summary);
-    paintCrewBoard(journalSlip);
-    dutyDesk.handoverBody.textContent = composeDutyHandover(summary, journalSlip);
+    journalSlip = writeShiftResult({
+      pickerName: summary.pickerName || summary.workerName || lastWorkerName || "Игрок",
+      score: Math.max(0, Number(summary.score) || 0),
+      testMode: !!summary.testMode,
+      lives: Math.max(0, Number(summary.lives) || 0),
+      reason: summary.reason || "complete",
+      shiftPassport: summary.shiftPassport || summary.shiftInfo || makeShiftPassport(lastShiftInfo || makeShiftInfo()),
+      stats: summary.stats || {}
+    });
+
+    ui.summaryBody.textContent = composeDutyHandover(summary, journalSlip);
+    showLedger(journalSlip);
+
     window.AZOTLastHandover = {
       at: Date.now(),
       lane: journalSlip && journalSlip.pickerRow && journalSlip.pickerRow.shiftPassport
@@ -744,151 +678,150 @@
       reviewReason: journalSlip ? journalSlip.reviewReason : ""
     };
 
-    if (journalSlip.archiveSaved === false) {
-      dutyDesk.handoverRankLine.classList.add("hidden");
+    if (journalSlip && journalSlip.archiveSaved === false) {
+      setRankLine("Результат показан только на экране: браузер не сохранил таблицу.");
+      return;
+    }
+    if (journalSlip && journalSlip.rank > 10) {
+      setRankLine("Место в общем рейтинге смен: " + journalSlip.rank + ".");
+      return;
+    }
+    if (journalSlip && journalSlip.rank) {
+      setRankLine("Место в таблице: " + journalSlip.rank + ".");
       return;
     }
 
-    if (journalSlip.rank > 10) {
-      dutyDesk.handoverRankLine.textContent = "Mесто в общем рeйтинге смен: " + journalSlip.rank + ". В тa6лице показаны 1-9 места и ваш результат отдельной строкой.";
-      dutyDesk.handoverRankLine.classList.remove("hidden");
+    setRankLine("");
+  }
+
+  function backToMenu() {
+    stopGame();
+    switchScreen("dispatch");
+    showPauseOverlay(false);
+    ui.workerInput.value = lastWorkerName || ui.workerInput.value;
+    if (lastShiftInfo) {
+      ui.lineSelect.value = lastShiftInfo.line;
+      ui.brigadeSelect.value = lastShiftInfo.team;
+    }
+    updateStartButton();
+  }
+
+  function repeatShift() {
+    if (!lastWorkerName) {
+      backToMenu();
       return;
     }
 
-    dutyDesk.handoverRankLine.textContent = "Mесто в таблицe 6ригады: " + journalSlip.rank + ".";
-    dutyDesk.handoverRankLine.classList.remove("hidden");
+    ui.workerInput.value = lastWorkerName;
+    updateStartButton();
+    startShift();
   }
 
-  function goBackToDispatch() {
-    retireActiveRun();
-    showDeskMode("dutyDesk");
-    paintFreezeGate(false);
-    dutyDesk.badgeAliasInput.value = lastBadgeAlias || dutyDesk.badgeAliasInput.value;
-    if (lastDutySlip) {
-      dutyDesk.laneSelect.value = lastDutySlip.sectorCode;
-      dutyDesk.crewSelect.value = lastDutySlip.brigadeCode;
+  function adjustFont(delta) {
+    changeFontSize((settings.fontSize || 16) + delta);
+    if (soundEngine && typeof soundEngine.init === "function") {
+      soundEngine.init();
     }
-    paintReleaseShiftButton();
-    paintCrewBoard(null);
+    beep();
   }
 
-  function relaunchLastRun() {
-    if (!lastBadgeAlias) {
-      goBackToDispatch();
-      return;
-    }
-
-    dutyDesk.badgeAliasInput.value = lastBadgeAlias;
-    paintReleaseShiftButton();
-    launchDutyRun();
-  }
-
-  function nudgeConsoleType(step) {
-    setConsoleTypeSize((terminalPrefs.fontSize || 16) + step);
-    if (terminalAudio && typeof terminalAudio.ensureContext === "function") {
-      terminalAudio.ensureContext();
-    }
-    beepDutyKey();
-  }
-
-  function flipDepotSound() {
-    if (!terminalAudio || typeof terminalAudio.toggle !== "function") {
-      terminalPrefs.soundEnabled = !terminalPrefs.soundEnabled;
+  function toggleSound() {
+    if (!soundEngine || typeof soundEngine.toggle !== "function") {
+      settings.sound = !settings.sound;
     } else {
-      terminalPrefs.soundEnabled = terminalAudio.toggle();
+      settings.sound = soundEngine.toggle();
     }
 
-    terminalPrefs = stashDutyConsolePrefs(terminalPrefs);
-    paintSoundToggles();
+    settings = saveSettings(settings);
+    updateSoundButtons();
   }
 
-  dutyDesk.badgeAliasInput.addEventListener("input", paintReleaseShiftButton);
-  dutyDesk.releaseShiftButton.addEventListener("click", launchDutyRun);
-  dutyDesk.laneSelect.addEventListener("change", function () {
-    rememberDutySlip();
-    paintReleaseShiftButton();
-    beepDutyKey();
-  });
-  dutyDesk.crewSelect.addEventListener("change", function () {
-    rememberDutySlip();
-    paintReleaseShiftButton();
-    beepDutyKey();
+  ui.workerInput.addEventListener("input", updateStartButton);
+  ui.startBtn.addEventListener("click", startShift);
+
+  ui.lineSelect.addEventListener("change", function () {
+    rememberShift();
+    updateStartButton();
+    beep();
   });
 
-  if (dutyDesk.freezeShiftButton) {
-    dutyDesk.freezeShiftButton.addEventListener("click", function () {
-      if (!activeShiftRun) {
+  ui.brigadeSelect.addEventListener("change", function () {
+    rememberShift();
+    updateStartButton();
+    beep();
+  });
+
+  if (ui.pauseBtn) {
+    ui.pauseBtn.addEventListener("click", function () {
+      if (!currentGame) {
         return;
       }
-
-      activeShiftRun.togglePause();
-      beepDutyKey();
+      currentGame.togglePause();
+      beep();
     });
   }
 
-  if (dutyDesk.reopenShiftButton) {
-    dutyDesk.reopenShiftButton.addEventListener("click", function () {
-      if (!activeShiftRun || !activeShiftRun.paused) {
+  if (ui.resumeBtn) {
+    ui.resumeBtn.addEventListener("click", function () {
+      if (!currentGame || !currentGame.paused) {
         return;
       }
-
-      activeShiftRun.togglePause();
-      beepDutyKey();
+      currentGame.togglePause();
+      beep();
     });
   }
 
-  if (dutyDesk.closeShiftButton) {
-    dutyDesk.closeShiftButton.addEventListener("click", function () {
-      if (!activeShiftRun) {
+  if (ui.endBtn) {
+    ui.endBtn.addEventListener("click", function () {
+      if (!currentGame) {
         return;
       }
-
-      if (activeShiftRun.paused) {
-        activeShiftRun.togglePause();
+      if (currentGame.paused) {
+        currentGame.togglePause();
       }
-
-      activeShiftRun.finishRun();
-      beepDutyKey();
+      currentGame.finishRun();
+      beep();
     });
   }
 
-  if (dutyDesk.rerunButton) {
-    dutyDesk.rerunButton.addEventListener("click", function () {
-      beepDutyKey();
-      relaunchLastRun();
+  if (ui.repeatBtn) {
+    ui.repeatBtn.addEventListener("click", function () {
+      beep();
+      repeatShift();
     });
   }
 
-  if (dutyDesk.returnButton) {
-    dutyDesk.returnButton.addEventListener("click", function () {
-      beepDutyKey();
-      goBackToDispatch();
+  if (ui.backBtn) {
+    ui.backBtn.addEventListener("click", function () {
+      beep();
+      backToMenu();
     });
   }
 
-  if (dutyDesk.floorSoundButton) {
-    dutyDesk.floorSoundButton.addEventListener("click", flipDepotSound);
-  }
-  if (dutyDesk.dispatchSoundButton) {
-    dutyDesk.dispatchSoundButton.addEventListener("click", flipDepotSound);
+  if (ui.soundBtnFloor) {
+    ui.soundBtnFloor.addEventListener("click", toggleSound);
   }
 
-  if (dutyDesk.typeDownButton) {
-    dutyDesk.typeDownButton.addEventListener("click", function () {
-      nudgeConsoleType(-1);
+  if (ui.soundBtnDispatch) {
+    ui.soundBtnDispatch.addEventListener("click", toggleSound);
+  }
+
+  if (ui.fontDecBtn) {
+    ui.fontDecBtn.addEventListener("click", function () {
+      adjustFont(-1);
     });
   }
 
-  if (dutyDesk.typeUpButton) {
-    dutyDesk.typeUpButton.addEventListener("click", function () {
-      nudgeConsoleType(1);
+  if (ui.fontIncBtn) {
+    ui.fontIncBtn.addEventListener("click", function () {
+      adjustFont(1);
     });
   }
 
-  window.addEventListener("beforeunload", retireActiveRun);
+  window.addEventListener("beforeunload", stopGame);
 
-  setConsoleTypeSize(terminalPrefs.fontSize);
-  paintSoundToggles();
-  paintReleaseShiftButton();
-  paintCrewBoard(null);
+  changeFontSize(settings.fontSize);
+  updateSoundButtons();
+  updateStartButton();
+  showLedger(null);
 })();
