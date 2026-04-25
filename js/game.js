@@ -1,5 +1,9 @@
 ﻿(function () {
-  // склад по тз в одном фиксированном окне: под него подогнаны спрайты, полки и верхний пульт.
+  // фиксированное поле по ТЗ.
+  // добавлены для удобства:
+  // после тестирование время койота и подбираемый
+  // бустер. Фиксированные значение записаны в константах 
+  // ниже, и могут быть быстро изменены для балансировки.
   const GAME_WIDTH = 1024;
   const GAME_HEIGHT = 768;
   const HUD_HEIGHT = 86;
@@ -9,8 +13,9 @@
   const COYOTE_TIME = 0.08;
   const BOOST_DURATION = 5;
 
-  // В одном атласе лежат и комплектовщик, и коробки, и тележки - так проще управлять ресурсами
-  // и гарантировать, что всё загрузится до начала смены.
+  // Атлас тут для сборок по ТЗ доку
+  // С одним png не таких ьбагов, где не погружается 
+  // спрайт и появляется случайным образом.
   const AZOT_FRAMES = {
     playerIdle: { sx: 2, sy: 1, sw: 14, sh: 30, rw: 25, rh: 55, ox: 0, oy: 0 },
     playerWalk1: { sx: 18, sy: 1, sw: 16, sh: 30, rw: 26, rh: 55, ox: -1, oy: 0 },
@@ -24,8 +29,9 @@
     cart2: { sx: 198, sy: 13, sw: 25, sh: 18 }
   };
 
-  // У каждого участка свой характер потока: экспресс тянет к срочности, хрупкий ряд — к аккуратной сборке,
-  // паллеты держат стабильный фон. В TEST MODE ниже добавляются отдельные смещения под испытания участка.
+  // Эти коэффициенты созданы для забегов на разных 
+  // секторах, чтобы подчеркнуть их особенности и дать разнообразия в геймплее. 
+  // Крутятся на баги и проверять устойчивость баланса.
   const SHIFT_SECTOR_RULES = {
     "bulk-lane": {
       urgentBonus: -0.05,
@@ -75,8 +81,9 @@
     return TEST_SHIFT_RULES[sectorCode] || TEST_SHIFT_RULES["bulk-lane"];
   }
 
-  // каждый параметр отслеживается отдельно потому что отчёты требуют деталей.
-  // нужна полная статистика для архива каждой смены.
+  // Тестеры жаловалис "непонятно, почему проиграл", 
+  // "непонятно, что делать, чтобы выиграть",
+  // одного общего score мало и нужно видеть, где именно идёт потеря очков.
   function makeShiftCounters() {
     return {
       ordinarySpawned: 0, ordinaryPicked: 0,
@@ -89,18 +96,15 @@
     };
   }
 
-  // Ограничение значения в диапазоне: вероятности не могут быть < 0 или > 1, иначе renderPixel падает.
-  // были без проверки баги когда сложность считалась неправильно.
+  // Без clamp тестовая сборка раздула шанс срочного выше 1, и
+  // выпадение пошло в кашу пропадающих заказов.
   function clampShiftRatio(value, minBound, maxBound) {
     if (value < minBound) return minBound;
     if (value > maxBound) return maxBound;
     return value;
   }
 
-  // AABB столкновение: простая проверка прямоугольников. Все объекты в игре используют координаты x, y, w, h.
-  // Хорошо работает, проверено на тысячах эвентов. Какое-то время был баг с y выключением (объекты зависали),
-  // потенциально из-за отрицательных координат, но сейчас таких багов нет.
-  // без проверки тележки не могли сталкиваться с коробками, если не ехали ровно по координатом стеллажей
+  // Обычный AABB по учебнику, в соло проще держать под контролем.
   function touchOnRack(objA, objB) {
     const aLeft = objA.x || 0;
     const aTop = objA.y || 0;
@@ -115,20 +119,21 @@
     return !(aRight <= bLeft || aBottom <= bTop || aLeft >= bRight || aTop >= bBottom);
   }
 
-  // normalizeShiftPassport: мёр всех параметров смены перед стартом.
-  // Если приходит мусор, дёргаем дефолты и логируем, чтобы потом выяснить причину.
-  // ВАЖНО: от sectorCode зависит испаун заказов и частота тележек
+  // Меню и раннер чтоб не жили в полурассинхроне, все страховки от
+  // кривого входа стеклись сюда.
   function normalizeShiftPassport(passport) {
     if (!passport || typeof passport !== 'object' || Array.isArray(passport)) {
-      console.warn("Shift passport is invalid, using defaults");
+      if (typeof window !== 'undefined' && window.console) {
+        console.warn("[AZOT] Invalid passport object received, fallback to defaults");
+      }
       passport = {};
     }
 
     const sector = SHIFT_SECTOR_RULES[passport.sectorCode] ? passport.sectorCode : 'bulk-lane';
-    // КОСТЫЛЬ: если не найден в правилах — берём паллеты (наиболее стабильный участок).
-    // На экспрессе часто неправильные данные приводили к краху, поэтому такой fallback.
+    // После поломанных стартов лучше
+    // дефолтный сектор, чем белый экран на загрузке.
     if (!SHIFT_SECTOR_RULES[sector]) {
-      console.error("Invalid sector code, forcing bulk-lane. Got:", passport.sectorCode);
+      console.error("[AZOT] Sector not in rules, reverting to fall-safe. Code was:", passport.sectorCode);
       passport.sectorCode = 'bulk-lane';
     }
 
@@ -176,6 +181,30 @@
     };
   }
 
+  // Дефотный noop. Оставлен его после того,
+  // как старые ветки без audio начали валить игру на undefined.play().
+  function noop() {}
+
+  function createGameAudioEngine(rawAudioEngine) {
+    const source = rawAudioEngine && typeof rawAudioEngine === 'object' ? rawAudioEngine : null;
+    const startBg = source && typeof source.startBg === 'function'
+      ? source.startBg.bind(source)
+      : source && typeof source.startAmbient === 'function'
+        ? source.startAmbient.bind(source)
+        : noop;
+    const stopBg = source && typeof source.stopBg === 'function'
+      ? source.stopBg.bind(source)
+      : source && typeof source.stopAmbient === 'function'
+        ? source.stopAmbient.bind(source)
+        : noop;
+
+    return {
+      play: source && typeof source.play === 'function' ? source.play.bind(source) : noop,
+      startBg: startBg,
+      stopBg: stopBg
+    };
+  }
+
   function AzotShiftRunner(canvas, options) {
     options = options || {};
     this.canvas = canvas;
@@ -183,29 +212,13 @@
     this.options = options;
     this.shiftPassport = normalizeShiftPassport(options.shiftPassport || options.shiftInfo);
     this.sectorRules = SHIFT_SECTOR_RULES[this.shiftPassport.sectorCode];
-    this.audio = options.audio || {
-      startAmbient: function () {},
-      stopAmbient: function () {},
-      play: function () {}
-    };
-    if (typeof this.audio.startAmbient !== 'function') {
-      this.audio.startAmbient = typeof this.audio.startBg === 'function'
-        ? this.audio.startBg.bind(this.audio)
-        : function () {};
-    }
-    if (typeof this.audio.stopAmbient !== 'function') {
-      this.audio.stopAmbient = typeof this.audio.stopBg === 'function'
-        ? this.audio.stopBg.bind(this.audio)
-        : function () {};
-    }
-    if (typeof this.audio.play !== 'function') {
-      this.audio.play = function () {};
-    }
+    this.audioEngine = createGameAudioEngine(options.audioEngine || options.audio);
     this.sprites = new Image();
     this.sprites.src = 'assets/sprites.png';
     this.bgTile = new Image();
     this.bgTile.src = 'assets/bg-tile.png';
-    // Kонкретная смена: ктo вышел, что падает с полок и скoлbко осталось времени
+    // Раунд держу на 90 сек как компроссминый вариант между тяготней и не почувствовать игру
+    // 60 все называли разминкой и не успевали втянуться.
 
     this.lastTimestamp = 0;
     this.warehouseDrift = 0;
@@ -250,8 +263,7 @@
   }
 
   AzotShiftRunner.prototype.start = function (pickerName, testMode) {
-    /* На части учебных терминалов canvas бывает заблокирован политикой браузера,
-     и смену нужно закрыть как техсбой.*/
+
     if (!this.ctx) {
       const finishHandler = this.options.onFinish || this.options.onEnd;
       if (typeof finishHandler === 'function') {
@@ -296,20 +308,23 @@
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
 
-    this.audio.startAmbient();
+    this.audioEngine.startBg();
     this.broadcastShiftBoard();
     window.requestAnimationFrame(this.boundLoop);
   };
 
   AzotShiftRunner.prototype.stop = function () {
     this.running = false;
-    this.audio.stopAmbient();
+
+    this.audioEngine.stopBg();
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
   };
 
   AzotShiftRunner.prototype.layOutTrainingRackFloor = function () {
-    // Расклад полок повторяет один и тот же склад, чтобы игрок запомнил полную геометрию смены.
+    // Рандомный расклад был опробован, но ругают за "проигрыш на
+    // лоускилле рандомайзере" С фиксированной схемой честнее и есть возможно подготовиться
+    // к каждой конкретной расстановке, без ставки на удачцу
     this.rackPlatforms = [
       { x: 0, y: FLOOR_Y, w: GAME_WIDTH, h: GAME_HEIGHT - FLOOR_Y, solid: false },
       { x: 40,  y: 600, w: 180, h: 18, solid: true },
@@ -334,7 +349,8 @@
       { x: 690, y: 240, w: 230, h: 18, solid: true }
     ];
 
-    this.player = {
+
+     this.player = {
       x: 90,
       y: 450,
       w: 25,
@@ -390,14 +406,20 @@
 
   AzotShiftRunner.prototype.pullNextCargoTag = function () {
     const difficulty = this.readShiftHeat();
+    // Эти шансы уже по жалобам: сперва сектора отличались названиями
+    // сильнее, чем реальным темпом.
     let fragileChance = clampShiftRatio(0.12 + difficulty * 0.28 + this.sectorRules.fragileBonus, 0.08, 0.48);
     let urgentChance = clampShiftRatio(0.22 + difficulty * 0.28 + this.sectorRules.urgentBonus, 0.12, 0.52);
 
     if (this.testMode) {
+      // Тут перегиб специально. Тестер находит баги быстрее на
+      // раздрай сцене, чем на аккуратной.
       const testRules = readTestSectorRule(this.shiftPassport.sectorCode);
       fragileChance = clampShiftRatio(fragileChance + testRules.fragileShift, 0.05, 0.66);
       urgentChance = clampShiftRatio(urgentChance + testRules.urgentShift, 0.05, 0.72);
 
+      // После такой сборки обычный груз почти исчез, так что
+      // теперь режем потолок вручную.
       if (this.shiftPassport.sectorCode === 'rush-dock' && fragileChance + urgentChance > 0.95) {
         fragileChance = Math.max(0.05, 0.95 - urgentChance);
       } else if (this.shiftPassport.sectorCode === 'fragile-bay' && fragileChance + urgentChance > 0.95) {
@@ -436,10 +458,12 @@
 
   AzotShiftRunner.prototype.cutCargoFromDock = function (type, targetPlatformIndex) {
     const platform = this.rackPlatforms[targetPlatformIndex];
+    // Эти числа набираны где человек реально успевал
+    // реагировать. Хрупкий заказ раньше падал быстрее, почти до невозможности реакции
     const sizeMap = {
-      ordinary: { w: 30, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },
-      urgent: { w: 24, h: 33, value: 20, gravityScale: 1, maxFallSpeed: 980 },
-      fragile: { w: 31, h: 29, value: 30, gravityScale: 0.22, maxFallSpeed: 150 }
+      ordinary: { w: 30, h: 28, value: 10, gravityScale: 1, maxFallSpeed: 960 },      // 10 очков, стандартное падение
+      urgent: { w: 24, h: 33, value: 20, gravityScale: 1, maxFallSpeed: 980 },        // в 2 раза дороже, но и сложнее
+      fragile: { w: 31, h: 29, value: 30, gravityScale: 0.22, maxFallSpeed: 150 }     // дорогой, но хрупкий - медленное падение
     };
     const data = sizeMap[type];
     const x = platform.x + 20 + Math.random() * Math.max(20, platform.w - data.w - 40);
@@ -450,9 +474,8 @@
     const fragileBreakPlatformIndex = type === 'fragile'
       ? supportedPlatforms[supportedPlatforms.length - 1]
       : null;
-/* просчитывание срабатывание перехвата заказов тележкой, и если они хрупкие, 
-происходит при достижении ими платформы, на которой они должны разбиться.
-Необходимое добавление для усложнения геймплейной части */
+    // Это мышление по учебнику и копилоту, но рабочее:
+    // когда платформы считались на лету, тележки съедали груз слишком поздно.
     return {
       x: x,
       y: -data.h - Math.random() * 140,
@@ -505,6 +528,8 @@
 
   AzotShiftRunner.prototype.applyEnergyRush = function () {
     this.shiftStats.boostsUsed += 1;
+    // Банка редбудлаа появилась после отзывов, что середина рана ровная и без
+    // шанса вернуть темп.
     this.player.boostTimer = BOOST_DURATION;
     this.player.speed = this.player.baseSpeed + 85;
     this.player.maxAirJumps = 1;
@@ -512,13 +537,15 @@
     this.radioMessage = 'Энeргетик: ускорение и двoйной прыжок';
     this.radioMessageTimer = 1.1;
     this.postDockStamp(this.player.x, this.player.y - 10, 'BOOST');
-    this.audio.play('pickupRare');
+    this.audioEngine.play('pickupRare');
   };
 
   AzotShiftRunner.prototype.spawnForklift = function () {
     const difficulty = this.readShiftHeat();
     const lane = this.forkliftLanes[Math.floor(Math.random() * this.forkliftLanes.length)];
     const fromLeft = Math.random() < 0.5;
+    // Тележки сначала были мягче, и игра слишком доброй. Сейчас в
+    // начале еще можно читать с легкостью, а дальше давление нарастает.
     const baseSpeed = 190 + difficulty * 120 + this.sectorRules.forkliftSpeedBonus;
 
     this.forkliftPatrols.push({
@@ -570,22 +597,27 @@
     this.shiftStats.falls += 1;
 
     if (this.testMode) {
+      // В тестовом режиме смерть только мешала гонять маршрут, так что тут просто reset.
       this.resetPlayerAfterFall();
-      this.audio.play('hit');
+      this.audioEngine.play('hit');
       this.flashTimer = 0.2;
       this.postDockStamp(this.player.x, this.player.y - 8, 'TEST');
-      this.radioMessage = 'Тестовый сброс после падения';
+      this.radioMessage = 'Тестовый сброс (штраф отключен)';
       this.radioMessageTimer = 0.9;
       return;
     }
 
+    // Жизни вообще появились после самой частой жалобы: "не понимаю как мне
+    // выиграть, если я случайно падаю и сразу проигрываю". 
+    // С ними даже можно позволить себе чуть больше нерасторопности
     this.score = Math.max(0, this.score - 10);
     this.lives = Math.max(0, this.lives - 1);
-    this.audio.play('hit');
+    this.audioEngine.play('hit');
     this.flashTimer = 0.2;
 
     if (this.lives <= 0) {
-      this.radioMessage = 'Вы снова упaли - игрa oкончена';
+      // Третий фейл закрывает ран, чтобы ошибк частые стоили смерти.
+      this.radioMessage = 'Вы упали в третий раз - смена завершена';
       this.radioMessageTimer = 1.2;
       this.finishRun('fall');
       return;
@@ -599,9 +631,11 @@
 
   AzotShiftRunner.prototype.onKeyDown = function (event) {
     if (!this.running || this.finished) {
-      return;
+      return;  // если смена не идёт - вводы игнорируем
     }
 
+    // WASD добавлены по аналогии с большинством игр, чтобы не заставлять людей
+    // привыкать к стрелкам по ТЗ
     if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
       this.playerControls.left = true;
     } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
@@ -610,6 +644,8 @@
       this.playerControls.down = true;
       this.dropThroughRack();
     } else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
+      // Флаг выглядит очень костыльно, но прямой прыжок из keydown на некоторых
+      // браузерах давал мерзкий рассинхрон и растунотого сборщика
       if (!event.repeat) {
         this.playerControls.jumpQueued = true;
       }
@@ -634,6 +670,8 @@
       return;
     }
     this.paused = !this.paused;
+    // Тут раннер специально почти ничего не знает про UI. После пары
+    // экспериментов стало проще держать оверлей снаружи.
     const pauseHandler = this.options.onPauseChange || this.options.onPauseToggle;
     if (typeof pauseHandler === 'function') {
       pauseHandler(this.paused);
@@ -647,10 +685,12 @@
 
     this.finished = true;
     this.running = false;
-    this.audio.stopAmbient();
+    this.audioEngine.stopBg();
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
 
+    // Этот guard из-за двойных финишей: если жал pause/end почти
+    // одновременно, и запись улетала в архив два раза.
     const finishHandler = this.options.onFinish || this.options.onEnd;
     if (typeof finishHandler === 'function') {
       finishHandler(this.sealShiftSummary(reason));
@@ -658,6 +698,8 @@
   };
 
   AzotShiftRunner.prototype.sealShiftSummary = function (reason) {
+    // Сводку держу в одном месте просто чтобы не ловить два разных формата после
+    // ручного и автоматического конца рана.
     const stats = this.shiftStats || makeShiftCounters();
 
     return {
@@ -668,7 +710,7 @@
       lives: this.lives,
       reason: reason || 'complete',
       shiftPassport: this.shiftPassport,
-      shiftInfo: this.shiftPassport,
+      shiftInfo: this.shiftPassport,  // старое имя живет до тех пор, пока я не доберусь до всех старых вызовов
       stats: {
         ordinarySpawned: stats.ordinarySpawned,
         urgentSpawned: stats.urgentSpawned,
@@ -713,8 +755,8 @@
   };
 
   AzotShiftRunner.prototype.update = function (dt) {
-    // В паузе функционируют только служебные таймеры, чтобы не нарушать анимацию и сообщения
-    // Игровые таймеры стоят, чтобы игрок мог стоять и не спешить с прохождением испытания.
+    // Полный стоп в паузе выглядел как зависание, особенно когда люди кидали
+    // друг другу запись экрана. Поэтому фон я чуть-чуть оставил живым.
     this.warehouseDrift += dt * (this.paused ? 18 : 48);
 
     if (this.radioMessageTimer > 0) {
@@ -725,6 +767,7 @@
     }
 
     this.dockPopups = this.dockPopups.filter(function (popup) {
+      // Эти всплывашки оставил после фидбека "я вообще не понял, что сейчас случилось".
       popup.life -= dt;
       popup.y -= dt * 34;
       return popup.life > 0;
@@ -741,6 +784,8 @@
     this.runTime += dt;
 
     if (this.player.boostTimer > 0) {
+      // Когда буст жил дольше, все просто учились бегать вокруг него. Сейчас он
+      // остается вкусным, но не превращает раунд в режим халявы.
       this.player.boostTimer -= dt;
       if (this.player.boostTimer <= 0) {
         this.player.boostTimer = 0;
@@ -761,18 +806,24 @@
       }
     }
 
+    // На ровном метрономе люди слишком быстро выучивали ритм, поэтому спавн тут
+    // специально с небольшим дрожанием.
     this.orderDropTimer -= dt;
     if (this.orderDropTimer <= 0 && this.warehouseOrders.length < this.readLaneQuota()) {
       this.spawnFallingOrder();
       this.orderDropTimer = 0.95 - this.readShiftHeat() * 0.45 + Math.random() * 0.25;
     }
 
+    // Тележки тоже не делаю идеальным метрономом: когда их можно считать как
+    // музыку, они перестают пугать.
     this.forkliftSpawnTimer -= dt;
     if (this.forkliftSpawnTimer <= 0 && this.forkliftPatrols.length < 3 + Math.floor(this.readShiftHeat() * 5)) {
       this.spawnForklift();
       this.forkliftSpawnTimer = 2.4 - this.readShiftHeat() * 1.45 + Math.random() * 0.35;
     }
 
+    // Частый буст слишком быстро убивал баланс, так что банка тут почти всегда
+    // воспринимается как подарок, а не как базовый ритм.
     this.energySpawnTimer -= dt;
     if (this.energySpawnTimer <= 0 && this.energyPickups.length < 1) {
       this.spawnEnergyPickup();
@@ -807,11 +858,11 @@
         player.onGround = false;
         player.coyoteTimer = 0;
         player.supportPlatformIndex = -1;
-        this.audio.play('jump');
+        this.audioEngine.play('jump');
       } else if (player.airJumpsLeft > 0) {
         player.vy = -player.jumpForce;
         player.airJumpsLeft -= 1;
-        this.audio.play('jump');
+        this.audioEngine.play('jump');
         this.postDockStamp(player.x, player.y - 6, 'x2');
       }
     }
@@ -838,6 +889,8 @@
     player.onGround = false;
     player.supportPlatformIndex = -1;
 
+    // Coyote time и мягкое приземление вообще родились после серии сообщений
+    // "я нажал прыжок, а игра сказала поздно". Тут хранится весь тот компромисс.
     for (let i = 1; i < this.rackPlatforms.length; i += 1) {
       if (i === player.dropThroughPlatformIndex) {
         continue;
@@ -908,6 +961,8 @@
     }
 
     this.score += cargo.value;
+    // После нескольких споров "я точно взял этот груз" оставил раздельный учет,
+    // чтобы потом не гадать, что именно засчиталось.
     if (cargo.type === 'fragile') {
       this.shiftStats.fragilePicked += 1;
     } else if (cargo.type === 'urgent') {
@@ -915,15 +970,17 @@
     } else {
       this.shiftStats.ordinaryPicked += 1;
     }
-    this.audio.play(cargo.type === 'ordinary' ? 'pickup' : 'pickupRare');
+    this.audioEngine.play(cargo.type === 'ordinary' ? 'pickup' : 'pickupRare');
     this.postDockStamp(cargo.x, cargo.y, '+' + cargo.value);
 
+    // Сообщения сверху появились после фидбека, что один звук не объясняет,
+    // за что сейчас дали или не дали очки.
     if (cargo.type === 'fragile') {
-      this.radioMessage = 'Хрупкий заказ пойман до падения';
+      this.radioMessage = 'Хрупкое успешно поймано, слава!';
     } else if (cargo.type === 'urgent') {
-      this.radioMessage = 'Срочный заказ обработан';
+      this.radioMessage = 'Срочный выполнен - в расписание!';
     } else {
-      this.radioMessage = 'Заказ принят';
+      this.radioMessage = 'Обычный заказ принят';
     }
     this.radioMessageTimer = 0.75;
 
@@ -935,7 +992,7 @@
     this.warehouseOrders.splice(index, 1);
     this.shiftStats.fragileBroken += 1;
     this.postDockStamp(item.x, platform.y - 12, 'x');
-    this.radioMessage = 'Хрупкий заказ разбился';
+    this.radioMessage = 'Хрупкий упал и разбился!';
     this.radioMessageTimer = 0.8;
     this.flashTimer = 0.1;
   };
@@ -944,12 +1001,11 @@
     this.warehouseOrders.splice(index, 1);
     this.shiftStats.urgentExpired += 1;
     this.postDockStamp(item.x, item.y, '!');
-    this.radioMessage = 'Срочный заказ просрочен';
+    this.radioMessage = 'Срочный просрочен - штраф!';
     this.radioMessageTimer = 0.8;
   };
 
   AzotShiftRunner.prototype.updateWarehouseOrders = function (dt) {
-    // Здесь живёт реальная возня смены: что-то долетает до полки, что-то ловят, что-то уходит в брак.
     for (let i = this.warehouseOrders.length - 1; i >= 0; i -= 1) {
       const cargo = this.warehouseOrders[i];
       cargo.pulse += dt * 4.5;
@@ -1032,6 +1088,9 @@
   };
 
   AzotShiftRunner.prototype.updateForkliftPatrols = function (dt) {
+    //иПока тележки не начали по-настояящему мешать, все
+    // писали, что можно играть  и не задумывать о препятствиях. 
+    // Сейчас они не декор, а угроза и держат в напряжении раунд.
     for (let i = this.forkliftPatrols.length - 1; i >= 0; i -= 1) {
       const cart = this.forkliftPatrols[i];
       cart.x += cart.speed * cart.dir * dt;
@@ -1044,9 +1103,9 @@
         this.player.vx = cart.dir * 220;
         this.player.vy = -200;
         this.flashTimer = 0.18;
-        this.radioMessage = 'Тележка сбила заказ';
+        this.radioMessage = 'Тележка сбила комплектовщика!';
         this.radioMessageTimer = 0.9;
-        this.audio.play('hit');
+        this.audioEngine.play('hit');
         this.postDockStamp(this.player.x, this.player.y - 8, '-15');
       }
 
@@ -1065,16 +1124,18 @@
             this.shiftStats.cartOrdinaryLosses += 1;
           }
           if (cargo.type === 'fragile') {
-            this.radioMessage = 'Тележка разбила хрупкий заказ';
+            this.radioMessage = 'Ущерб: тележка увезла хрупкий груз!';
           } else if (cargo.type === 'urgent') {
-            this.radioMessage = 'Тележка увезла срочный заказ';
+            this.radioMessage = 'Срочный груз потерян тележке';
           } else {
-            this.radioMessage = 'Тележка увезла заказ';
+            this.radioMessage = 'Груз потеряна тележкой';
           }
           this.radioMessageTimer = 0.85;
           this.postDockStamp(cargo.x, cargo.y, '-' + penalty);
         }
       }
+
+
 
       if (cart.x < -120 || cart.x > GAME_WIDTH + 120) {
         this.forkliftPatrols.splice(i, 1);
@@ -1083,6 +1144,9 @@
   };
 
   AzotShiftRunner.prototype.postDockStamp = function (x, y, text) {
+    // Эта мелочь пережила все чистки, потому что без нее у пропадает
+    // чувство, что игра замечает  действие при каждом взаимодействии.
+    // помогает не пропустить важные моменты, получения буста или потери груза.
     this.dockPopups.push({
       x: x,
       y: y,
@@ -1097,6 +1161,7 @@
   };
 
   AzotShiftRunner.prototype.broadcastShiftBoard = function () {
+    // Сюда уходит только слепок состояния.
     const updateHandler = this.options.onShiftBoardUpdate || this.options.onStateUpdate;
     if (typeof updateHandler === 'function') {
       updateHandler({
@@ -1104,12 +1169,12 @@
         workerName: this.pickerAlias,
         testMode: this.testMode,
         score: this.score,
-        timeLeft: this.timeLeft,
+        timeLeft: this.timeLeft,  
         lives: this.lives,
         shiftPassport: this.shiftPassport,
         shiftInfo: this.shiftPassport
       });
-    }
+      }
   };
 
   AzotShiftRunner.prototype.drawSprite = function (frameName, x, y, w, h, flip) {
@@ -1117,6 +1182,7 @@
     if (!this.sprites.complete || !frame) {
       return;
     }
+
 
     const ctx = this.ctx;
     ctx.save();
@@ -1130,32 +1196,8 @@
     ctx.restore();
   };
 
-  AzotShiftRunner.prototype.drawRackPanel = function (ctx, x, y, w, h, palette) {
-    const colors = palette || {};
-    ctx.save();
-    ctx.fillStyle = colors.base || '#273445';
-    ctx.fillRect(x, y, w, h);
 
-    ctx.fillStyle = colors.top || 'rgba(214, 230, 238, 0.16)';
-    ctx.fillRect(x, y, w, Math.max(3, Math.floor(h * 0.18)));
-
-    ctx.fillStyle = colors.bottom || 'rgba(7, 12, 18, 0.22)';
-    ctx.fillRect(x, y + h - Math.max(3, Math.floor(h * 0.2)), w, Math.max(3, Math.floor(h * 0.2)));
-
-    ctx.strokeStyle = colors.stroke || '#5d7484';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-
-    ctx.strokeStyle = colors.innerStroke || 'rgba(13, 24, 36, 0.7)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
-
-    ctx.fillStyle = colors.detail || 'rgba(12, 22, 32, 0.32)';
-    ctx.fillRect(x + 8, y + 8, w - 16, h - 16);
-    ctx.restore();
-  };
-
-  AzotShiftRunner.prototype.drawDockHazard = function (ctx, x, y, w, h, offset) {
+   AzotShiftRunner.prototype.drawDockHazard = function (ctx, x, y, w, h, offset) {
     const stripeWidth = 12;
     const shift = ((offset || 0) % (stripeWidth * 2) + (stripeWidth * 2)) % (stripeWidth * 2);
     ctx.save();
@@ -1190,20 +1232,48 @@
     this.renderDockPopups(ctx);
     this.renderRadioMessage(ctx);
 
-    if (this.flashTimer > 0) {
+     if (this.flashTimer > 0) {
       ctx.fillStyle = 'rgba(255, 120, 120, 0.16)';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     }
   };
 
+  AzotShiftRunner.prototype.drawRackPanel = function (ctx, x, y, w, h, palette) {
+     const colors = palette || {};
+    ctx.save();
+    ctx.fillStyle = colors.base || '#273445';
+    ctx.fillRect(x, y, w, h);
+
+    ctx.fillStyle = colors.top || 'rgba(214, 230, 238, 0.16)';
+    ctx.fillRect(x, y, w, Math.max(3, Math.floor(h * 0.18)));
+
+    ctx.fillStyle = colors.bottom || 'rgba(7, 12, 18, 0.22)';
+    ctx.fillRect(x, y + h - Math.max(3, Math.floor(h * 0.2)), w, Math.max(3, Math.floor(h * 0.2)));
+
+    ctx.strokeStyle = colors.stroke || '#5d7484';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+
+    ctx.strokeStyle = colors.innerStroke || 'rgba(13, 24, 36, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
+
+    ctx.fillStyle = colors.detail || 'rgba(12, 22, 32, 0.32)';
+    ctx.fillRect(x + 8, y + 8, w - 16, h - 16);
+    ctx.restore();
+  };
+
+
   AzotShiftRunner.prototype.renderBackground = function (ctx) {
-    // На фоне специально оставлены трубы, свет и тени,
-    // чтобы смена читалась как склад, а не как пустое пространство.
+    // Фон остался кодовым просто потому, что слишком часто его нужно 
+    // было подкручивать и муторно каждый раз создавать новые картинки.
     ctx.fillStyle = '#0d1116';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     const bgGradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
-    bgGradient.addColorStop(0, '#272e34');
+
+
+     bgGradient.addColorStop(0, '#272e34');
     bgGradient.addColorStop(0.22, '#22292f');
     bgGradient.addColorStop(0.62, '#171d23');
     bgGradient.addColorStop(1, '#0f1318');
@@ -1227,6 +1297,8 @@
     if (this.bgTile.complete) {
         const pattern = ctx.createPattern(this.bgTile, 'repeat');
         if (pattern) {
+
+
           ctx.save();
           ctx.translate(-this.warehouseDrift, 0);
           ctx.globalAlpha = 0.06;
@@ -1256,6 +1328,8 @@
     const lightOffset = (this.warehouseDrift * 0.4) % lightSpacing;
     for (let x = -lightWidth - lightOffset; x < GAME_WIDTH + lightWidth; x += lightSpacing) {
       ctx.fillStyle = 'rgba(150, 235, 244, 0.03)';
+
+
       ctx.fillRect(x, WORLD_TOP + 86, lightWidth, 6);
       ctx.fillStyle = 'rgba(71, 212, 232, 0.05)';
       ctx.fillRect(x + 12, WORLD_TOP + 84, lightWidth - 24, 2);
@@ -1266,6 +1340,7 @@
         this.drawRackPanel(ctx, x, y, 112, 76, {
           base: '#2b343c',
           top: 'rgba(223, 232, 236, 0.12)',
+
           bottom: 'rgba(12, 18, 24, 0.28)',
           stroke: '#536673',
           innerStroke: 'rgba(24, 35, 44, 0.72)',
@@ -1277,8 +1352,9 @@
     for (let pipeY = WORLD_TOP + 142; pipeY < FLOOR_Y - 60; pipeY += 148) {
       ctx.fillStyle = '#7e8a90';
       ctx.fillRect(0, pipeY, GAME_WIDTH, 6);
+
       ctx.fillStyle = 'rgba(56, 64, 70, 0.45)';
-      ctx.fillRect(0, pipeY + 4, GAME_WIDTH, 2);
+      ctx.fillRect(0, pipeY + 4, GAME_WIDTH, 2 * (FLOOR_Y - WORLD_TOP - 16));
     }
 
     for (let pipeX = 116; pipeX < GAME_WIDTH; pipeX += 256) {
@@ -1292,10 +1368,13 @@
 
     const floorGradient = ctx.createLinearGradient(0, FLOOR_Y, 0, GAME_HEIGHT);
     floorGradient.addColorStop(0, '#1b1a2b');
+
     floorGradient.addColorStop(1, '#171d25');
     ctx.fillStyle = floorGradient;
     ctx.fillRect(0, FLOOR_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_Y);
   };
+
+
 
   AzotShiftRunner.prototype.renderRackPlatforms = function (ctx) {
     for (let i = 1; i < this.rackPlatforms.length; i += 1) {
@@ -1496,8 +1575,9 @@
     ctx.fillText(this.radioMessage, 512, 114);
     ctx.restore();
   };
-/* Резервный глобальный экземпляр конструктора, что6ы игра начинала работать, 
-даже если основной объект AZOTGame не оказался доступен.*/
+
+  // два глобальных имени остались как хвост:
+  // старые экраны на них завязаны, а чинить это затратно по времени.
   window.AZOTGame = {
     AzotShiftRunner: AzotShiftRunner
   };

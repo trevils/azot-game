@@ -1,836 +1,633 @@
 (function () {
-  const CREW_LEDGER_KEY = "azot-crew-ledger-v5";
-  const DISPATCH_PREFS_KEY = "azot-dispatch-prefs-v5";
-  const BROKEN_LEDGER_SNAPSHOT_KEY = "azot-ledger-quarantine-v2";
-  const LEGACY_CREW_LEDGER_KEYS = ["azot-crew-ledger-v4"];
-  const LEGACY_DISPATCH_PREFS_KEYS = ["azot-dispatch-prefs-v4"];
-  const ARCHIVE_LIMIT = 60;
-  const RESERVE_PICKER_NAME = "Стажер";
+// хранилище смен и настроек для АЗОТ-склад
+//
+//   v3 → v4: добавлен паспорт смены, сломан импорт, чиним openBrigadeJourna
+//   v4 → v5: переименован pickerName→name везде кроме одного места (см ниже),
+//             поднял fragilePicked с 25 до 30 — вопрос насчет баланса
+//             BROKEN_LEDGER_SNAPSHOT_KEY лежат битые архивы
 
-  const WAREHOUSE_RATE_CARD = {
-    ordinaryPicked: 10,
-    urgentPicked: 20,
-    fragilePicked: 30,
-    falls: -10,
-    cartHits: -15,
-    cartOrdinaryLosses: -5,
-    cartUrgentLosses: -8,
-    cartFragileLosses: -15
-  };
+var CREW_LEDGER_KEY           = "azot-crew-ledger-v5";
+var DISPATCH_PREFS_KEY        = "azot-dispatch-prefs-v5";
+var BROKEN_LEDGER_SNAPSHOT_KEY = "azot-ledger-quarantine-v2";  // v2 потому что v1 потерян на мерджах
+var LEGACY_CREW_LEDGER_KEYS   = ["azot-crew-ledger-v4"];
+var LEGACY_DISPATCH_PREFS_KEYS = ["azot-dispatch-prefs-v4"];
+var ARCHIVE_LIMIT = 60;
+var RESERVE_PICKER_NAME = "Стажер";  // когда имя на диспетчере не пришло
 
-  const AZOT_SHIFT_BOOK = {
-    sectors: {
-      "bulk-lane": {
-        label: "Паллетный ряд",
-        shortLabel: "Паллеты",
-        boardTag: "PLT-17",
-        zoneTag: "PLT",
-        supervisor: "Мастер Орлова",
-        incidentLimit: 3,
-        targetPoints: 400,
-        reviewFloor: 90,
-        shiftRule: "не просадить паллетный поток",
-        shiftRoute: "окно перебора",
-        overloadReason: "Паллетный ряд ушел в пересорт",
-        scoreFloorReason: "Паллетный поток сдан ниже сменной нормы",
-        expressSlipReason: "",
-        breakageReason: "",
-        faultStamp: "Паллетная линия не подняла смену",
-        auditDesk: "пульт Орловой"
-      },
-      "rush-dock": {
-        label: "Экспресс-ворота",
-        shortLabel: "Экспресс",
-        boardTag: "EXP-04",
-        zoneTag: "EXP",
-        supervisor: "Диспетчер Климов",
-        incidentLimit: 1,
-        targetPoints: 180,
-        reviewFloor: 110,
-        shiftRule: "не сорвать срочные окна",
-        shiftRoute: "стол Климова",
-        overloadReason: "Экспресс-ворота сорвали окно отгрузки",
-        scoreFloorReason: "Экспресс-поток закрыт ниже сменной нормы",
-        expressSlipReason: "На воротах сорвано срочное окно",
-        breakageReason: "",
-        faultStamp: "Экспресс-ворота потеряли пульт смены",
-        auditDesk: "экспресс-пульт Климова"
-      },
-      "fragile-bay": {
-        label: "Хрупкий ряд",
-        shortLabel: "Хрупкий",
-        boardTag: "FRG-09",
-        zoneTag: "FRG",
-        supervisor: "Контролер Ланина",
-        incidentLimit: 0,
-        targetPoints: 150,
-        reviewFloor: 85,
-        shiftRule: "сдать хрупкий товар без боя",
-        shiftRoute: "контрольный стол Ланиной",
-        overloadReason: "Хрупкий ряд дал брак и возвраты",
-        scoreFloorReason: "Хрупкий ряд закрыт ниже планки безбрака",
-        expressSlipReason: "",
-        breakageReason: "На хрупком ряду зафиксирован бой",
-        faultStamp: "Хрупкий ряд остался без игрового поля",
-        auditDesk: "стол Ланиной"
-      }
+var WAREHOUSE_RATE_CARD = {
+  ordinaryPicked:    10,
+  urgentPicked:      20,
+  fragilePicked:     30,   // было 25, по тесту введен пересчет после третьего прогона
+  falls:            -10,
+  cartHits:         -15,
+  cartOrdinaryLosses: -5,
+  cartUrgentLosses:   -8,
+  cartFragileLosses: -15
+};
+
+// конфиг секторов и бригад — не трогать без синхронизации с game.js
+// 2DO: вынести в отдельный файл
+var AZOT_SHIFT_BOOK = {
+  sectors: {
+    "bulk-lane": {
+      label: "Паллетный ряд", shortLabel: "Паллеты",
+      boardTag: "PLT-17", zoneTag: "PLT",
+      supervisor: "Мастер Орлова",
+      incidentLimit: 3,
+      targetPoints: 400, reviewFloor: 90,
+      shiftRule:        "не просадить паллетный поток",
+      shiftRoute:       "окно перебора",
+      overloadReason:   "Паллетный ряд ушел в пересорт",
+      scoreFloorReason: "Паллетный поток сдан ниже сменной нормы",
+      expressSlipReason: "", breakageReason: "",
+      faultStamp: "Паллетная линия не подняла смену",
+      auditDesk:  "пульт Орловой"
     },
-    brigades: {
-      "north-3": {
-        label: "Север-3",
-        brigadeTag: "N3",
-        lead: "Романов",
-        handoverDesk: "окно А2"
-      },
-      "azot-pack": {
-        label: "Азот-комплект",
-        brigadeTag: "AZP",
-        lead: "Ведерникова",
-        handoverDesk: "окно Б1"
-      },
-      "night-belt": {
-        label: "Ночная лента",
-        brigadeTag: "NBT",
-        lead: "Чернов",
-        handoverDesk: "ночной пост"
-      }
+    "rush-dock": {
+      label: "Экспресс-ворота", shortLabel: "Экспресс",
+      boardTag: "EXP-04", zoneTag: "EXP",
+      supervisor: "Диспетчер Климов",
+      incidentLimit: 60,    // у него своя статистика срывов
+      targetPoints: 180, reviewFloor: 110,
+      shiftRule:        "не сорвать срочные окна",
+      shiftRoute:       "стол Климова",
+      overloadReason:   "Экспресс-ворота сорвали окно отгрузки",
+      scoreFloorReason: "Экспресс-поток закрыт ниже сменной нормы",
+      expressSlipReason: "На воротах сорвано срочное окно",
+      breakageReason: "",
+      faultStamp: "Экспресс-ворота потеряли пульт смены",
+      auditDesk:  "экспресс-пульт Климова"
+    },
+    "fragile-bay": {
+      label: "Хрупкий ряд", shortLabel: "Хрупкий",
+      boardTag: "FRG-09", zoneTag: "FRG",
+      supervisor: "Контролер Ланина",
+      incidentLimit: 30,   // не баг. хрупкому инцидент это катастрофа
+      targetPoints: 150, reviewFloor: 85,
+      shiftRule:        "сдать хрупкий товар без боя",
+      shiftRoute:       "контрольный стол Ланиной",
+      overloadReason:   "Хрупкий ряд дал брак и возвраты",
+      scoreFloorReason: "Хрупкий ряд закрыт ниже планки безбрака",
+      expressSlipReason: "",
+      breakageReason:   "На хрупком ряду зафиксирован бой",
+      faultStamp: "Хрупкий ряд остался без игрового поля",
+      auditDesk:  "стол Ланиной"
     }
+  },
+  brigades: {
+    "north-3":   { label: "Север-3",       brigadeTag: "N3",  lead: "Романов",    handoverDesk: "окно А2" },
+    "azot-pack": { label: "Азот-комплект", brigadeTag: "AZP", lead: "Ведерникова", handoverDesk: "окно Б1" },
+    "night-belt":{ label: "Ночная лента",  brigadeTag: "NBT", lead: "Чернов",      handoverDesk: "ночной пост" }
+  }
+};
+
+
+// принимает сырой passport из сохраненной строки или из game.js
+// возвращает всегда полный объект — даже если на вход пришел null или мусор
+
+// разрослась потому что между v3 и v4 паспорт менял форму три раза,
+// и каждый раз на сливаниях приносился старый localStorage.
+// сейчас тут живут страховки на все эти случаи разом.
+function normalizeShiftPassport(pp) {
+  if (!pp || typeof pp !== 'object' || Array.isArray(pp)) pp = {};
+
+  var sc_key = AZOT_SHIFT_BOOK.sectors[pp.sectorCode]  ? pp.sectorCode  : "bulk-lane";
+  var br_key = AZOT_SHIFT_BOOK.brigades[pp.brigadeCode] ? pp.brigadeCode : "north-3";
+  var SC = AZOT_SHIFT_BOOK.sectors[sc_key];
+  var BR = AZOT_SHIFT_BOOK.brigades[br_key];
+
+  return {
+    sectorCode:        sc_key,
+    sectorLabel:       SC.label,
+    sectorShortLabel:  SC.shortLabel,
+    boardTag:          pp.boardTag || SC.boardTag,
+    brigadeCode:       br_key,
+    brigadeLabel:      BR.label,
+    brigadeLead:       BR.lead,
+    brigadeCallSign:   pp.brigadeCallSign || BR.brigadeTag,
+    supervisor:        SC.supervisor,
+    archiveTag:        BR.brigadeTag + "-" + SC.zoneTag,
+    incidentLimit:     SC.incidentLimit,  // строго из конфига — pp.incidentLimit не доверяем после бага с хрупким
+    targetPoints:      SC.targetPoints,
+    reviewFloor:       SC.reviewFloor,
+    shiftRule:         SC.shiftRule,
+    handoverDesk:      BR.handoverDesk,
+    shiftRoute:        pp.shiftRoute  || SC.shiftRoute,
+    launchBrief:       pp.launchBrief || SC.shiftRule,
+    faultStamp:        pp.faultStamp  || SC.faultStamp,
+    overloadReason:    SC.overloadReason,
+    scoreFloorReason:  SC.scoreFloorReason,
+    expressSlipReason: SC.expressSlipReason,
+    breakageReason:    SC.breakageReason,
+    auditDesk:         SC.auditDesk
+  };
+}
+
+
+// эта функция — самое страшное место файла
+// сюда прилетает всё: записи из старых версий, записи после дублей финиша,
+// записи с невозможными очками (откуда 9999 взялось)
+//
+// логика такая:
+//   1. чистим и нормализуем все поля
+//   2. пересчитываем очки по тарифной карте
+//   3. сравниваем с тем что пришло — если расходится больше чем на 5, ставим флаг
+//   4. навешиваем бейдж и причины ревью
+//
+// возвращает null если строка совсем мусорная (не объект)
+function validateAndScoreShift(rawRow) {
+  if (!rawRow || typeof rawRow !== "object") return null;
+
+  var pp   = normalizeShiftPassport(rawRow.shiftPassport);
+  var src  = (rawRow.stats && typeof rawRow.stats === "object") ? rawRow.stats : {};
+
+  var facts = {
+    ordinarySpawned: 0, ordinaryPicked: 0,
+    urgentSpawned:   0, urgentPicked:   0,
+    fragileSpawned:  0, fragilePicked:  0,
+    falls: 0, cartHits: 0,
+    cartCargoLosses: 0, cartOrdinaryLosses: 0, cartUrgentLosses: 0, cartFragileLosses: 0,
+    urgentExpired: 0, fragileBroken: 0,
+    boostsUsed: 0
   };
 
-  // normalizeShiftPassport: назначение параметров смены на основе дежурного листка при задаче в мейн меню.
-  function normalizeShiftPassport(rawPassport) {
-    let source = rawPassport;
-    
-    // если приходит не-объект или массив — сброс в пусто, чтобы не копить битые учатски.
-    if (!source || typeof source !== 'object' || Array.isArray(source)) {
-      source = {};
-    }
+  var keys = Object.keys(facts);
+  var hasStats = false;
+  var exp = 0;
+  var marks = [];
 
-    const sectorCode = AZOT_SHIFT_BOOK.sectors[source.sectorCode] ? source.sectorCode : "bulk-lane";
-    const brigadeCode = AZOT_SHIFT_BOOK.brigades[source.brigadeCode] ? source.brigadeCode : "north-3";
-    const sectorConfig = AZOT_SHIFT_BOOK.sectors[sectorCode];
-    const brigadeConfig = AZOT_SHIFT_BOOK.brigades[brigadeCode];
-  // функция сломалась инцидент-лимит для хрупкого ряда 0 вместо 1, срочные падать стали чаще.
-  // забыли обновить brigadeTag для ночной ленты.
-    return {
-      sectorCode: sectorCode,
-      sectorLabel: sectorConfig.label,
-      sectorShortLabel: sectorConfig.shortLabel,
-      boardTag: source.boardTag || sectorConfig.boardTag,
-      brigadeCode: brigadeCode,
-      brigadeLabel: brigadeConfig.label,
-      brigadeLead: brigadeConfig.lead,
-      brigadeCallSign: source.brigadeCallSign || brigadeConfig.brigadeTag,
-      supervisor: sectorConfig.supervisor,
-      archiveTag: brigadeConfig.brigadeTag + "-" + sectorConfig.zoneTag,
-      incidentLimit: sectorConfig.incidentLimit,
-      targetPoints: sectorConfig.targetPoints,
-      reviewFloor: sectorConfig.reviewFloor,
-      shiftRule: sectorConfig.shiftRule,
-      handoverDesk: brigadeConfig.handoverDesk,
-      shiftRoute: source.shiftRoute || sectorConfig.shiftRoute,
-      launchBrief: source.launchBrief || sectorConfig.shiftRule,
-      faultStamp: source.faultStamp || sectorConfig.faultStamp,
-      overloadReason: sectorConfig.overloadReason,
-      scoreFloorReason: sectorConfig.scoreFloorReason,
-      expressSlipReason: sectorConfig.expressSlipReason,
-      breakageReason: sectorConfig.breakageReason,
-      auditDesk: sectorConfig.auditDesk
-    };
+  // имя: в v4 было pickerName, в v5 переехало в name.
+  // одно место в game.js до сих пор шлёт pickerName — не трогаю пока не сломалось
+  var nm = typeof rawRow.name === "string" ? rawRow.name.trim()
+         : typeof rawRow.pickerName === "string" ? rawRow.pickerName.trim()
+         : "";
+  if (nm.length > 16) nm = nm.slice(0, 16);
+
+  var score = Number(rawRow.score);
+  score = Number.isFinite(score) ? Math.max(0, Math.round(score)) : 0;
+
+  var ts = Number(rawRow.createdAt);
+
+  var reason = (rawRow.reason === "fall" || rawRow.reason === "timeout" || rawRow.reason === "canvas-error")
+    ? rawRow.reason : "complete";
+
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var v = Number(src[k]);
+    v = (Number.isFinite(v) && v > 0) ? Math.floor(v) : 0;
+    facts[k] = v;
+    if (v > 0) hasStats = true;
   }
 
-  // cutBrigadeLedgerRow: валидация и дебранчирование смены для архива.
-  // самая сложная функция: она проверяет практически всё что может пойти не так.
-  // Баги: неправильные счета, мусорные данные, потеря инцидентов при краше, ручное редактирование localStorage.
-  // (если вручную отредактировать счёт, чтобы попасть в топ.)
-  function validateAndScoreShift(rawRow) {
-    if (!rawRow || typeof rawRow !== "object") {
-      return null;
+  exp += facts.ordinaryPicked    * WAREHOUSE_RATE_CARD.ordinaryPicked;
+  exp += facts.urgentPicked      * WAREHOUSE_RATE_CARD.urgentPicked;
+  exp += facts.fragilePicked     * WAREHOUSE_RATE_CARD.fragilePicked;
+  exp += facts.falls             * WAREHOUSE_RATE_CARD.falls;
+  exp += facts.cartHits          * WAREHOUSE_RATE_CARD.cartHits;
+  exp += facts.cartOrdinaryLosses * WAREHOUSE_RATE_CARD.cartOrdinaryLosses;
+  exp += facts.cartUrgentLosses  * WAREHOUSE_RATE_CARD.cartUrgentLosses;
+  exp += facts.cartFragileLosses * WAREHOUSE_RATE_CARD.cartFragileLosses;
+
+  var incidents = facts.falls + facts.cartHits + facts.cartCargoLosses
+                + facts.urgentExpired + facts.fragileBroken;
+
+  // секторные бонусы.
+  // пороги подбирались на живых прогонах, менять только вместе с тестами и синхронизацией с game.js
+  if (pp.sectorCode === "bulk-lane") {
+    if (facts.ordinaryPicked >= 10 && facts.cartOrdinaryLosses === 0) {
+      exp += 12;
+      marks.push("паллетный план удержан");
     }
-
-    const passport = normalizeShiftPassport(rawRow.shiftPassport);
-    const shiftSource = rawRow.stats && typeof rawRow.stats === "object" ? rawRow.stats : {};
-    const shiftFacts = {
-      ordinarySpawned: 0, ordinaryPicked: 0,
-      urgentSpawned: 0, urgentPicked: 0,
-      fragileSpawned: 0, fragilePicked: 0,
-      falls: 0, cartHits: 0,
-      cartCargoLosses: 0, cartOrdinaryLosses: 0, cartUrgentLosses: 0, cartFragileLosses: 0,
-      urgentExpired: 0, fragileBroken: 0,
-      boostsUsed: 0
-    };
-    const shiftFactNames = Object.keys(shiftFacts);
-    let hasServiceStats = false;
-    let expectedPoints = 0;
-    let incidentLoad = 0;
-    const serviceMarks = [];
-    // Имя может придти как "name" или "pickerName" — старая версия другого использовала первое.
-    // Режем на 16 — лимит для совместимости со старой LEDGER версией.
-    const trimmedName = typeof rawRow.name === "string"
-      ? rawRow.name.trim().slice(0, 16)
-      : typeof rawRow.pickerName === "string"
-        ? rawRow.pickerName.trim().slice(0, 16)
-        : "";
-    const numericScore = Number(rawRow.score);
-    const actualScore = Number.isFinite(numericScore) ? Math.max(0, Math.round(numericScore)) : 0;
-    const numericCreatedAt = Number(rawRow.createdAt);
-    // Код окончания: "complete" (нормальное окончание), "fall" (упал 3 раза), 
-    // "timeout" (смена кончилась по времени)
-    // "canvas-error" (браузер заблокировал canvas). Нужно для анализа режима отказа на работникa.
-    const reason = rawRow.reason === "fall" || rawRow.reason === "timeout" || rawRow.reason === "canvas-error"
-      ? rawRow.reason
-      : "complete";
-
-    // Пересчитываем счётчики: каждый валидируется отдельно потому что может быть типовая ошибка при сохранении.
-    // Если значение не-число или отрицательное — используем 0, безопаснее чем крашить сайт во время игры.
-    for (let index = 0; index < shiftFactNames.length; index += 1) {
-      const factName = shiftFactNames[index];
-      const rawValue = Number(shiftSource[factName]);
-      const preparedValue = Number.isFinite(rawValue) && rawValue > 0 ? Math.floor(rawValue) : 0;
-      shiftFacts[factName] = preparedValue;
-
-      if (preparedValue > 0) {
-        hasServiceStats = true;
-      }
+    if (facts.cartCargoLosses >= 3) {
+      exp -= 10;
+      marks.push("паллетный ряд дал пересорт");
     }
-
-    expectedPoints += shiftFacts.ordinaryPicked * WAREHOUSE_RATE_CARD.ordinaryPicked;
-    expectedPoints += shiftFacts.urgentPicked * WAREHOUSE_RATE_CARD.urgentPicked;
-    expectedPoints += shiftFacts.fragilePicked * WAREHOUSE_RATE_CARD.fragilePicked;
-    expectedPoints += shiftFacts.falls * WAREHOUSE_RATE_CARD.falls;
-    expectedPoints += shiftFacts.cartHits * WAREHOUSE_RATE_CARD.cartHits;
-    expectedPoints += shiftFacts.cartOrdinaryLosses * WAREHOUSE_RATE_CARD.cartOrdinaryLosses;
-    expectedPoints += shiftFacts.cartUrgentLosses * WAREHOUSE_RATE_CARD.cartUrgentLosses;
-    expectedPoints += shiftFacts.cartFragileLosses * WAREHOUSE_RATE_CARD.cartFragileLosses;
-
-    incidentLoad =
-      shiftFacts.falls +
-      shiftFacts.cartHits +
-      shiftFacts.cartCargoLosses +
-      shiftFacts.urgentExpired +
-      shiftFacts.fragileBroken;
-
-    if (passport.sectorCode === "bulk-lane") {
-      if (shiftFacts.ordinaryPicked >= 10 && shiftFacts.cartOrdinaryLosses === 0) {
-        expectedPoints += 12;
-        serviceMarks.push("паллетный план удержан");
-      }
-      if (shiftFacts.cartCargoLosses >= 3) {
-        expectedPoints -= 10;
-        serviceMarks.push("паллетный ряд дал пересорт");
-      }
-    }
-
-    if (passport.sectorCode === "rush-dock") {
-      if (shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
-        expectedPoints += 15;
-        serviceMarks.push("экспресс-окно закрыто без срыва");
-      }
-      if (shiftFacts.urgentExpired > 0) {
-        expectedPoints -= shiftFacts.urgentExpired * 12;
-        serviceMarks.push("на воротах была просрочка");
-      }
-    }
-
-    if (passport.sectorCode === "fragile-bay") {
-      if (shiftFacts.fragilePicked >= 3 && shiftFacts.fragileBroken === 0 && shiftFacts.cartFragileLosses === 0) {
-        expectedPoints += 20;
-        serviceMarks.push("хрупкий ряд сдан без боя");
-      }
-      if (shiftFacts.fragileBroken + shiftFacts.cartFragileLosses > 0) {
-        expectedPoints -= 20;
-        serviceMarks.push("по хрупкому прошел брак");
-      }
-    }
-
-    if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
-      expectedPoints += 6;
-      serviceMarks.push("Север-3 отработал без травм");
-    }
-
-    if (passport.brigadeCode === "azot-pack" && shiftFacts.ordinaryPicked + shiftFacts.fragilePicked >= 8 && shiftFacts.cartCargoLosses === 0) {
-      expectedPoints += 10;
-      serviceMarks.push("Азот-комплект закрыл плотную отгрузку");
-    }
-
-    if (passport.brigadeCode === "night-belt" && shiftFacts.boostsUsed >= 2 && shiftFacts.falls === 0) {
-      expectedPoints += 8;
-      serviceMarks.push("ночная лента держала темп");
-    }
-
-    if (incidentLoad > passport.incidentLimit) {
-      expectedPoints -= (incidentLoad - passport.incidentLimit) * 5;
-    }
-
-    if (reason === "canvas-error") {
-      expectedPoints = 0;
-    }
-
-    expectedPoints = Math.max(0, Math.round(expectedPoints));
-
-    const ledgerRow = {
-      entryId: typeof rawRow.entryId === "string" && rawRow.entryId.trim()
-        ? rawRow.entryId
-        : "shift-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
-      name: trimmedName || RESERVE_PICKER_NAME,
-      score: actualScore,
-      createdAt: Number.isFinite(numericCreatedAt) && numericCreatedAt > 0 ? Math.floor(numericCreatedAt) : Date.now(),
-      reason: reason,
-      lives: Number.isFinite(Number(rawRow.lives)) && Number(rawRow.lives) > 0 ? Math.floor(Number(rawRow.lives)) : 0,
-      testMode: !!rawRow.testMode,
-      shiftPassport: passport,
-      stats: shiftFacts,
-      incidentLoad: incidentLoad,
-      shiftBadge: "Дежурный комплектовщик",
-      serviceNote: serviceMarks.join("; "),
-      scoreCheck: hasServiceStats
-        ? (actualScore === expectedPoints ? "ok" : Math.abs(actualScore - expectedPoints) <= 5 ? "minor-drift" : "needs-hand-check")
-        : "legacy-row",
-      expectedPoints: hasServiceStats ? expectedPoints : actualScore,
-      reviewFlag: false,
-      reviewReason: "",
-      shiftBoss: passport.supervisor,
-      auditDesk: passport.auditDesk,
-      archiveTag: passport.archiveTag,
-      planClosed: actualScore >= passport.targetPoints
-    };
-
-    if (ledgerRow.reason === "canvas-error") {
-      ledgerRow.shiftBadge = "Сбой терминала";
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = "Терминал не открыл игровое поле";
-      return ledgerRow;
-    }
-
-    //(паллеты) отмечать смены без потерь. (экспресс) закрытые в срок окна.
-    // (хрупкий) отмечать при нулевом бое. (ночная лента) добавление мотивирующего бейджа.
-    if (passport.brigadeCode === "north-3" && shiftFacts.falls === 0 && shiftFacts.cartHits === 0) {
-      ledgerRow.shiftBadge = "Север-3 без потерь";
-    } else if (passport.sectorCode === "rush-dock" && shiftFacts.urgentPicked >= 4 && shiftFacts.urgentExpired === 0) {
-      ledgerRow.shiftBadge = "Экспресс закрыт в срок";
-    } else if (passport.sectorCode === "fragile-bay" && shiftFacts.fragilePicked >= 3 && shiftFacts.fragileBroken === 0 && shiftFacts.cartFragileLosses === 0) {
-      ledgerRow.shiftBadge = "Ряд хрупкого под контролем";
-    } else if (passport.sectorCode === "bulk-lane" && shiftFacts.ordinaryPicked >= 8 && shiftFacts.cartCargoLosses <= 1) {
-      ledgerRow.shiftBadge = "Паллетный мотор";
-    } else if (passport.brigadeCode === "night-belt" && shiftFacts.boostsUsed >= 2) {
-      ledgerRow.shiftBadge = "Ночная лента держит темп";
-    } else if (passport.brigadeCode === "azot-pack" && shiftFacts.fragilePicked >= 2 && shiftFacts.cartFragileLosses === 0) {
-      ledgerRow.shiftBadge = "Азот-комплект без боя";
-    } else if (shiftFacts.falls >= 3) {
-      ledgerRow.shiftBadge = "Нарушение ТБ";
-    } else if (shiftFacts.cartCargoLosses >= 3) {
-      ledgerRow.shiftBadge = "Сложный маршрут";
-    }
-
-    if (ledgerRow.scoreCheck === "needs-hand-check") {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = "Очки не сошлись со служебной статистикой";
-      return ledgerRow;
-    }
-
-    if (passport.sectorCode === "rush-dock" && shiftFacts.urgentExpired > 0) {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = passport.expressSlipReason || "Срыв экспресс-окна на воротах";
-      return ledgerRow;
-    }
-
-    if (passport.sectorCode === "fragile-bay" && shiftFacts.fragileBroken + shiftFacts.cartFragileLosses > 0) {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = passport.breakageReason || "Бой хрупкого товара на участке";
-      return ledgerRow;
-    }
-
-    if (shiftFacts.falls >= 3) {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = "Повторные нарушения ТБ за смену";
-      return ledgerRow;
-    }
-
-    if (incidentLoad > passport.incidentLimit) {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = passport.overloadReason || "Потери участка выше нормы";
-      return ledgerRow;
-    }
-
-    if (!ledgerRow.planClosed && ledgerRow.reason === "complete" && ledgerRow.score < passport.reviewFloor) {
-      ledgerRow.reviewFlag = true;
-      ledgerRow.reviewReason = passport.scoreFloorReason || "Участок сдан ниже сменной нормы";
-    }
-
-    if (ledgerRow.testMode) {
-      if (passport.sectorCode === "rush-dock" && shiftFacts.urgentExpired > 40) {
-        ledgerRow.reviewFlag = true;
-        ledgerRow.reviewReason = "Просрочено больше 40 срочных заказов";
-        ledgerRow.planClosed = false;
-      }
-      if (passport.sectorCode === "fragile-bay" && shiftFacts.cartHits > 60) {
-        ledgerRow.reviewFlag = true;
-        ledgerRow.reviewReason = "Тележки сбили больше 60 заказов";
-        ledgerRow.planClosed = false;
-      }
-    }
-
-    return ledgerRow;
   }
 
-  // Совместимость со старым именем функции, которое всё ещё используется ниже по файлу.
-  const cutBrigadeLedgerRow = validateAndScoreShift;
-
-  function sortBrigadeLedger(leftRow, rightRow) {
-    if (leftRow.score !== rightRow.score) {
-      return rightRow.score - leftRow.score;
+  if (pp.sectorCode === "rush-dock") {
+    if (facts.urgentPicked >= 4 && facts.urgentExpired === 0) {
+      exp += 15;
+      marks.push("экспресс-окно закрыто без срыва");
     }
-
-    if (leftRow.reviewFlag !== rightRow.reviewFlag) {
-      return leftRow.reviewFlag ? 1 : -1;
+    if (facts.urgentExpired > 0) {
+      exp -= facts.urgentExpired * 12;  // штраф за каждый просроченный, не пушаьный
+      marks.push("на воротах была просрочка");
     }
-
-    if (leftRow.incidentLoad !== rightRow.incidentLoad) {
-      return leftRow.incidentLoad - rightRow.incidentLoad;
-    }
-
-    if (leftRow.stats.urgentPicked !== rightRow.stats.urgentPicked) {
-      return rightRow.stats.urgentPicked - leftRow.stats.urgentPicked;
-    }
-
-    return leftRow.createdAt - rightRow.createdAt;
   }
 
-  function sealShiftHandover(summaryOrName, maybeScore) {
-    if (summaryOrName && typeof summaryOrName === "object") {
-      return cutBrigadeLedgerRow({
-        entryId: "",
-        name: summaryOrName.pickerName,
-        score: summaryOrName.score,
-        createdAt: Date.now(),
-        reason: summaryOrName.reason,
-        lives: summaryOrName.lives,
-        testMode: !!summaryOrName.testMode,
-        shiftPassport: summaryOrName.shiftPassport,
-        stats: summaryOrName.stats
-      });
+  if (pp.sectorCode === "fragile-bay") {
+    if (facts.fragilePicked >= 3 && facts.fragileBroken === 0 && facts.cartFragileLosses === 0) {
+      exp += 20;
+      marks.push("хрупкий ряд сдан без боя");
     }
+    if (facts.fragileBroken + facts.cartFragileLosses > 0) {
+      exp -= 20;
+      marks.push("по хрупкому прошел брак");
+    }
+  }
 
+  // бригадные бонусы
+  if (pp.brigadeCode === "north-3" && facts.falls === 0 && facts.cartHits === 0) {
+    exp += 6;
+    marks.push("Север-3 отработал без травм");
+  }
+  if (pp.brigadeCode === "azot-pack" && (facts.ordinaryPicked + facts.fragilePicked) >= 8 && facts.cartCargoLosses === 0) {
+    exp += 10;
+    marks.push("Азот-комплект закрыл плотную отгрузку");
+  }
+  if (pp.brigadeCode === "night-belt" && facts.boostsUsed >= 2 && facts.falls === 0) {
+    exp += 8;
+    marks.push("ночная лента держала темп");
+  }
+
+  if (incidents > pp.incidentLimit) exp -= (incidents - pp.incidentLimit) * 5;
+  if (reason === "canvas-error")    exp  = 0;
+  exp = Math.max(0, Math.round(exp));
+
+  // scoreCheck: сравниваем пришедший score с тем что мы сами насчитали
+  // minor-drift (<=5) — скорее всего окей, бывает от порядка применения бонусов
+  // needs-hand-check — реально расходится, надо смотреть
+  var chk;
+  if (!hasStats)                           chk = "legacy-row";
+  else if (score === exp)                  chk = "ok";
+  else if (Math.abs(score - exp) <= 5)     chk = "minor-drift";
+  else                                     chk = "needs-hand-check";
+
+  var row = {
+    entryId: (typeof rawRow.entryId === "string" && rawRow.entryId.trim())
+      ? rawRow.entryId
+      : "shift-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+    name:         nm || RESERVE_PICKER_NAME,
+    score:        score,
+    createdAt:    (Number.isFinite(ts) && ts > 0) ? Math.floor(ts) : Date.now(),
+    reason:       reason,
+    lives:        (Number.isFinite(Number(rawRow.lives)) && Number(rawRow.lives) > 0) ? Math.floor(Number(rawRow.lives)) : 0,
+    testMode:     !!rawRow.testMode,
+    shiftPassport: pp,
+    stats:        facts,
+    incidentLoad: incidents,
+    shiftBadge:   "Дежурный комплектовщик",
+    serviceNote:  marks.join("; "),
+    scoreCheck:   chk,
+    expectedPoints: hasStats ? exp : score,
+    reviewFlag:   false,
+    reviewReason: "",
+    shiftBoss:    pp.supervisor,
+    auditDesk:    pp.auditDesk,
+    archiveTag:   pp.archiveTag,
+    planClosed:   score >= pp.targetPoints
+  };
+
+  // canvas-error обрабатываем первым — дальше смотреть нечего
+  if (row.reason === "canvas-error") {
+    row.shiftBadge   = "Сбой терминала";
+    row.reviewFlag   = true;
+    row.reviewReason = "Терминал не открыл игровое поле";
+    return row;
+  }
+
+  // бейджи — порядок важен, первое совпадение побеждает
+  if      (pp.brigadeCode === "north-3"    && facts.falls === 0 && facts.cartHits === 0)           row.shiftBadge = "Север-3 без потерь";
+  else if (pp.sectorCode  === "rush-dock"  && facts.urgentPicked >= 4 && facts.urgentExpired === 0) row.shiftBadge = "Экспресс закрыт в срок";
+  else if (pp.sectorCode  === "fragile-bay"&& facts.fragilePicked >= 3 && facts.fragileBroken === 0 && facts.cartFragileLosses === 0) row.shiftBadge = "Ряд хрупкого под контролем";
+  else if (pp.sectorCode  === "bulk-lane"  && facts.ordinaryPicked >= 8 && facts.cartCargoLosses <= 1) row.shiftBadge = "Паллетный мотор";
+  else if (pp.brigadeCode === "night-belt" && facts.boostsUsed >= 2)                                row.shiftBadge = "Ночная лента держит темп";
+  else if (pp.brigadeCode === "azot-pack"  && facts.fragilePicked >= 2 && facts.cartFragileLosses === 0) row.shiftBadge = "Азот-комплект без боя";
+  else if (facts.falls >= 3)               row.shiftBadge = "Нарушение ТБ";
+  else if (facts.cartCargoLosses >= 3)     row.shiftBadge = "Сложный маршрут";
+
+  // флаги ревью — каждый return отдельно чтобы причина была одна конкретная,
+  // а не "что-то из трёх"
+  if (chk === "needs-hand-check") {
+    row.reviewFlag   = true;
+    row.reviewReason = "Очки не сошлись со служебной статистикой";
+    return row;
+  }
+
+  if (pp.sectorCode === "rush-dock" && facts.urgentExpired > 0) {
+    row.reviewFlag   = true;
+    row.reviewReason = pp.expressSlipReason || "Срыв экспресс-окна на воротах";
+    return row;
+  }
+
+  if (pp.sectorCode === "fragile-bay" && (facts.fragileBroken + facts.cartFragileLosses) > 0) {
+    row.reviewFlag   = true;
+    row.reviewReason = pp.breakageReason || "Бой хрупкого товара на участке";
+    return row;
+  }
+
+  if (facts.falls >= 3) {
+    row.reviewFlag   = true;
+    row.reviewReason = "Повторные нарушения ТБ за смену";
+    return row;
+  }
+
+  if (incidents > pp.incidentLimit) {
+    row.reviewFlag   = true;
+    row.reviewReason = pp.overloadReason || "Потери участка выше нормы";
+    return row;
+  }
+
+  if (!row.planClosed && row.reason === "complete" && row.score < pp.reviewFloor) {
+    row.reviewFlag   = true;
+    row.reviewReason = pp.scoreFloorReason || "Участок сдан ниже сменной нормы";
+  }
+
+  // отдельные пороги для тест-режима — в обычной игре такого не бывает физически
+  if (row.testMode) {
+    if (pp.sectorCode === "rush-dock"   && facts.urgentExpired > 40) { row.reviewFlag = true; row.reviewReason = "Просрочено больше 40 срочных заказов"; row.planClosed = false; }
+    if (pp.sectorCode === "fragile-bay" && facts.cartHits > 60)      { row.reviewFlag = true; row.reviewReason = "Тележки сбили больше 60 заказов";       row.planClosed = false; }
+  }
+
+  return row;
+}
+
+// старое имя оставлено — в двух местах game.js его вызывает напрямую
+var cutBrigadeLedgerRow = validateAndScoreShift;
+
+
+function sortBrigadeLedger(a, b) {
+  if (a.score       !== b.score)       return b.score - a.score;
+  if (a.reviewFlag  !== b.reviewFlag)  return a.reviewFlag ? 1 : -1;
+  if (a.incidentLoad !== b.incidentLoad) return a.incidentLoad - b.incidentLoad;
+  if (a.stats.urgentPicked !== b.stats.urgentPicked) return b.stats.urgentPicked - a.stats.urgentPicked;
+  return a.createdAt - b.createdAt;
+}
+
+
+// упаковывает итог смены в строку журнала
+// принимает либо объект-summary (новый путь) либо имя+очки (совместимость с v3)
+function sealShiftHandover(summaryOrName, maybeScore) {
+  if (summaryOrName && typeof summaryOrName === "object") {
     return cutBrigadeLedgerRow({
-      entryId: "",
-      name: summaryOrName,
-      score: maybeScore,
-      createdAt: Date.now(),
-      reason: "complete",
-      lives: 0,
-      testMode: false,
-      shiftPassport: null,
-      stats: {}
+      entryId:      "",
+      name:         summaryOrName.pickerName,  // game.js v4 шлет pickerName, v5 — name, принимаем оба
+      score:        summaryOrName.score,
+      createdAt:    Date.now(),
+      reason:       summaryOrName.reason,
+      lives:        summaryOrName.lives,
+      testMode:     !!summaryOrName.testMode,
+      shiftPassport: summaryOrName.shiftPassport,
+      stats:        summaryOrName.stats
     });
   }
-  // На стенде жмут "закрыть смену" два раза, браузер воспринимает как enter-enter.
-  // Поэтому в архиве иногда дублируются записи — ниже фильтруем по отпечаткам.
-  // openBrigadeJournal: загрузка архива смен из localStorage.
-  // - Если новая версия потеряна — пытаемся восстановить из legacy v4.
-  // - Если JSON испорчена (пользователь редактировал) — кладём в quarantine и инициализируем пусто.
-  // - Отмечаем дубли по (pickerName + score + createdAt) — иногда браузер сохраняет дважды при краше.
-  // - Если архив выбитый (> 60 смен) — удаляем самые старые записи.
-  function openBrigadeJournal() {
-    let rawArchive = "";
-    let storedRows = [];
-    let rows = [];
-    let wasRepaired = false;
-    let removedRows = 0;
-    let archiveIssue = "";
-    let sourceKey = CREW_LEDGER_KEY;
-    const knownIds = {};
-    const knownShiftFingerprints = {};
+  return cutBrigadeLedgerRow({
+    entryId: "", name: summaryOrName, score: maybeScore,
+    createdAt: Date.now(), reason: "complete",
+    lives: 0, testMode: false, shiftPassport: null, stats: {}
+  });
+}
 
-    // Попытка загрузить из нового хранилища (v5). Если браузер заблокировал localStorage — бьём ошибку.
-    try {
-      rawArchive = window.localStorage.getItem(CREW_LEDGER_KEY) || "";
-    } catch (error) {
-      // Браузер может заблокировать localStorage в приватном режиме или при превышении quota.
-      // В этом случае игра работает, но смены не сохраняются — читай logs если что-то странное.
-      return {
-        rows: [],
-        wasRepaired: false,
-        removedRows: 0,
-        archiveIssue: "browser-blocked-ledger"
-      };
+
+// читает архив из localStorage, чистит мусор, возвращает готовый массив строк
+//
+// много всего обрабатывает потому что за два года сломалось буквально всё:
+// - двойные финиши (кнопка нажата дважды за 200мс) → дубли по fingerprint
+// - битый JSON после обрыва записи → quarantine
+// - localStorage недоступен в приватном режиме Firefox → возврат пустого
+// - старые ключи (v4) после обновления → миграция на лету
+// - storedRows оказался объектом а не массивом (было, причина не найдена)
+function openBrigadeJournal() {
+  var raw = "";
+  var stored = [];
+  var rows = [];
+  var repaired = false;
+  var removed  = 0;
+  var issue    = "";
+  var srcKey   = CREW_LEDGER_KEY;
+  var seenIds  = {};
+  var seenFP   = {};  // fingerprint: name|archiveTag|score|минута
+
+  try {
+    raw = window.localStorage.getItem(CREW_LEDGER_KEY) || "";
+  } catch (e) {
+    return { rows: [], wasRepaired: false, removedRows: 0, archiveIssue: "browser-blocked-ledger" };
+  }
+
+  if (!raw) {
+    for (var li = 0; li < LEGACY_CREW_LEDGER_KEYS.length; li++) {
+      try { raw = window.localStorage.getItem(LEGACY_CREW_LEDGER_KEYS[li]) || ""; } catch(e) { raw = ""; }
+      if (raw) { srcKey = LEGACY_CREW_LEDGER_KEYS[li]; issue = "legacy-ledger-migrated"; repaired = true; break; }
+    }
+  }
+
+  if (!raw) return { rows: [], wasRepaired: false, removedRows: 0, archiveIssue: "", sourceKey: srcKey };
+
+  try {
+    stored = JSON.parse(raw);
+  } catch(e) {
+    // JSON мертвый — откладываем в quarantine и живем дальше
+    try { window.localStorage.setItem(BROKEN_LEDGER_SNAPSHOT_KEY, raw.slice(0, 12000)); } catch(q) {}
+    try { window.localStorage.removeItem(CREW_LEDGER_KEY); } catch(c) {}
+    return { rows: [], wasRepaired: true, removedRows: 0, archiveIssue: "ledger-quarantined", sourceKey: srcKey };
+  }
+
+  if (!Array.isArray(stored)) {
+    // разом оказался объект. откуда — непонятно
+    try { window.localStorage.removeItem(CREW_LEDGER_KEY); } catch(c) {}
+    return { rows: [], wasRepaired: true, removedRows: 0, archiveIssue: "ledger-reset-from-object", sourceKey: srcKey };
+  }
+
+  for (var i = 0; i < stored.length; i++) {
+    var r = cutBrigadeLedgerRow(stored[i]);
+    if (!r) { removed++; repaired = true; continue; }
+
+    if (seenIds[r.entryId]) { r.entryId = r.entryId + "-" + (i + 1); repaired = true; }
+
+    var fp = r.name + "|" + r.archiveTag + "|" + r.score + "|" + Math.floor(r.createdAt / 60000);
+    if (seenFP[fp]) { removed++; repaired = true; issue = issue || "double-handover-pruned"; continue; }
+
+    seenIds[r.entryId] = true;
+    seenFP[fp] = true;
+
+    var s = stored[i];
+    if (s.shiftBadge !== r.shiftBadge || s.reviewReason !== r.reviewReason
+     || s.scoreCheck !== r.scoreCheck  || s.serviceNote  !== r.serviceNote) {
+      repaired = true;
     }
 
-    // Если текущее хранилище пусто — ищем старую версию (v4). Миграция при обновлениях.
-    if (!rawArchive) {
-      for (let index = 0; index < LEGACY_CREW_LEDGER_KEYS.length; index += 1) {
-        try {
-          rawArchive = window.localStorage.getItem(LEGACY_CREW_LEDGER_KEYS[index]) || "";
-        } catch (error) {
-          rawArchive = "";
-        }
+    rows.push(r);
+  }
 
-        if (rawArchive) {
-          sourceKey = LEGACY_CREW_LEDGER_KEYS[index];
-          archiveIssue = "legacy-ledger-migrated";
-          wasRepaired = true;
-          break;
-        }
-      }
-    }
+  rows.sort(sortBrigadeLedger);
 
-    // Совсем пусто — новый пользователь. Возвращаем пустой архив без ошибки.
-    if (!rawArchive) {
-      return {
-        rows: [],
-        wasRepaired: false,
-        removedRows: 0,
-        archiveIssue: "",
-        sourceKey: sourceKey
-      };
-    }
+  if (rows.length > ARCHIVE_LIMIT) {
+    removed += rows.length - ARCHIVE_LIMIT;
+    rows = rows.slice(0, ARCHIVE_LIMIT);
+    repaired = true;
+  }
 
-    // Парсим JSON. Если сломана (пользователь редактировал руками) — кладём в quarantine файл и продолжаем пусто.
-    // КРИТИЧНО: нель потерять работника по ошибке парса, лучше потерять одну смену чем весь архив.
-    try {
-      storedRows = JSON.parse(rawArchive);
-    } catch (error) {
-      archiveIssue = "ledger-quarantined";
-      wasRepaired = true;
+  return { rows: rows, wasRepaired: repaired, removedRows: removed, archiveIssue: issue, sourceKey: srcKey };
+}
 
-      try {
-        window.localStorage.setItem(BROKEN_LEDGER_SNAPSHOT_KEY, rawArchive.slice(0, 12000));
-      } catch (quarantineError) {}
 
-      try {
-        window.localStorage.removeItem(CREW_LEDGER_KEY);
-      } catch (cleanupError) {}
+// пишет архив в localStorage.
+// если не влезает — режет ступенчато: сначала 40 строк без лишних полей,
+// потом топ-10 вообще без статистики.
+// возвращает что удалось сохранить — вызывающий код потом решает что показывать.
+function stashBrigadeJournal(rows) {
+  var full = rows.slice(0, ARCHIVE_LIMIT);
 
-      return {
-        rows: [],
-        wasRepaired: true,
-        removedRows: 0,
-        archiveIssue: archiveIssue,
-        sourceKey: sourceKey
-      };
-    }
+  try {
+    window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(full));
+    return { archiveSaved: true, archiveMode: "full-archive", persistedRows: full, rowsSkipped: 0, archiveIssue: "" };
+  } catch(e) {}
 
-    if (!Array.isArray(storedRows)) {
-      archiveIssue = "ledger-reset-from-object";
-      wasRepaired = true;
-
-      try {
-        window.localStorage.removeItem(CREW_LEDGER_KEY);
-      } catch (cleanupError) {}
-
-      return {
-        rows: [],
-        wasRepaired: true,
-        removedRows: 0,
-        archiveIssue: archiveIssue,
-        sourceKey: sourceKey
-      };
-    }
-
-    for (let index = 0; index < storedRows.length; index += 1) {
-      const ledgerRow = cutBrigadeLedgerRow(storedRows[index]);
-
-      if (!ledgerRow) {
-        removedRows += 1;
-        wasRepaired = true;
-        continue;
-      }
-
-      if (knownIds[ledgerRow.entryId]) {
-        ledgerRow.entryId = ledgerRow.entryId + "-" + (index + 1);
-        wasRepaired = true;
-      }
-
-      const fingerprint =
-        ledgerRow.name + "|" +
-        ledgerRow.archiveTag + "|" +
-        ledgerRow.score + "|" +
-        Math.floor(ledgerRow.createdAt / 60000);
-
-      if (knownShiftFingerprints[fingerprint]) {
-        removedRows += 1;
-        wasRepaired = true;
-        archiveIssue = archiveIssue || "double-handover-pruned";
-        continue;
-      }
-
-      knownIds[ledgerRow.entryId] = true;
-      knownShiftFingerprints[fingerprint] = true;
-
-      if (
-        storedRows[index].shiftBadge !== ledgerRow.shiftBadge ||
-        storedRows[index].reviewReason !== ledgerRow.reviewReason ||
-        storedRows[index].scoreCheck !== ledgerRow.scoreCheck ||
-        storedRows[index].serviceNote !== ledgerRow.serviceNote
-      ) {
-        wasRepaired = true;
-      }
-
-      rows.push(ledgerRow);
-    }
-
-    rows.sort(sortBrigadeLedger);
-
-    if (rows.length > ARCHIVE_LIMIT) {
-      removedRows += rows.length - ARCHIVE_LIMIT;
-      rows = rows.slice(0, ARCHIVE_LIMIT);
-      wasRepaired = true;
-    }
-
+  var compact = full.slice(0, 40).map(function(r) {
     return {
-      rows: rows,
-      wasRepaired: wasRepaired,
-      removedRows: removedRows,
-      archiveIssue: archiveIssue,
-      sourceKey: sourceKey
+      entryId: r.entryId, name: r.name, score: r.score,
+      createdAt: r.createdAt, reason: r.reason,
+      shiftPassport: { sectorCode: r.shiftPassport.sectorCode, brigadeCode: r.shiftPassport.brigadeCode },
+      stats: r.stats,
+      shiftBadge: r.shiftBadge, serviceNote: r.serviceNote,
+      reviewReason: r.reviewReason, scoreCheck: r.scoreCheck, shiftBoss: r.shiftBoss
     };
-  }
-//расширено хранилище, миграция prefs.journal, нормализация и восстановление данных
-  function stashBrigadeJournal(rows) {
-    const fullRows = rows.slice(0, ARCHIVE_LIMIT);
+  });
 
-    try {
-      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(fullRows));
-      return {
-        archiveSaved: true,
-        archiveMode: "full-archive",
-        persistedRows: fullRows,
-        rowsSkipped: 0,
-        archiveIssue: ""
-      };
-    } catch (error) {}
+  try {
+    window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(compact));
+    return { archiveSaved: true, archiveMode: "trimmed-archive", persistedRows: full.slice(0, 40), rowsSkipped: full.length - 40, archiveIssue: "archive-trimmed-for-browser" };
+  } catch(e) {}
 
-    // Если квота будет предельной, урезаем архив, не теряем служебные причины и разметки.
-    const compactRows = fullRows.slice(0, 40).map(function (row) {
-      return {
-        entryId: row.entryId,
-        name: row.name,
-        score: row.score,
-        createdAt: row.createdAt,
-        reason: row.reason,
-        shiftPassport: {
-          sectorCode: row.shiftPassport.sectorCode,
-          brigadeCode: row.shiftPassport.brigadeCode
-        },
-        stats: row.stats,
-        shiftBadge: row.shiftBadge,
-        serviceNote: row.serviceNote,
-        reviewReason: row.reviewReason,
-        scoreCheck: row.scoreCheck,
-        shiftBoss: row.shiftBoss
-      };
-    });
-
-    try {
-      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(compactRows));
-      return {
-        archiveSaved: true,
-        archiveMode: "trimmed-archive",
-        persistedRows: fullRows.slice(0, 40),
-        rowsSkipped: fullRows.length - 40,
-        archiveIssue: "archive-trimmed-for-browser"
-      };
-    } catch (error) {}
-
-    const watchlistRows = fullRows.slice(0, 10).map(function (row) {
-      return {
-        entryId: row.entryId,
-        name: row.name,
-        score: row.score,
-        createdAt: row.createdAt,
-        shiftBadge: row.shiftBadge,
-        reviewReason: row.reviewReason,
-        shiftPassport: {
-          sectorCode: row.shiftPassport.sectorCode,
-          brigadeCode: row.shiftPassport.brigadeCode
-        }
-      };
-    });
-
-    try {
-      window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(watchlistRows));
-      return {
-        archiveSaved: true,
-        archiveMode: "watchlist-top10",
-        persistedRows: fullRows.slice(0, 10),
-        rowsSkipped: fullRows.length - 10,
-        archiveIssue: "only-top10-fits"
-      };
-    } catch (error) {}
-
+  // рубеж — топ-10 без stats. хоть имена видны
+  var mini = full.slice(0, 10).map(function(r) {
     return {
-      archiveSaved: false,
-      archiveMode: "screen-only",
-      persistedRows: fullRows,
-      rowsSkipped: 0,
-      archiveIssue: "browser-blocked-ledger"
+      entryId: r.entryId, name: r.name, score: r.score, createdAt: r.createdAt,
+      shiftBadge: r.shiftBadge, reviewReason: r.reviewReason,
+      shiftPassport: { sectorCode: r.shiftPassport.sectorCode, brigadeCode: r.shiftPassport.brigadeCode }
     };
+  });
+
+  try {
+    window.localStorage.setItem(CREW_LEDGER_KEY, JSON.stringify(mini));
+    return { archiveSaved: true, archiveMode: "watchlist-top10", persistedRows: full.slice(0, 10), rowsSkipped: full.length - 10, archiveIssue: "only-top10-fits" };
+  } catch(e) {}
+
+  return { archiveSaved: false, archiveMode: "screen-only", persistedRows: full, rowsSkipped: 0, archiveIssue: "browser-blocked-ledger" };
+}
+
+
+function readCrewWatchboard() {
+  var snap = openBrigadeJournal();
+  if (snap.wasRepaired) {
+    stashBrigadeJournal(snap.rows);
+    if (snap.sourceKey !== CREW_LEDGER_KEY) {
+      try { window.localStorage.removeItem(snap.sourceKey); } catch(e) {}
+    }
+  }
+  return snap.rows;
+}
+
+
+function logShiftToDutyJournal(summaryOrName, maybeScore) {
+  var snap = openBrigadeJournal();
+  var cur  = sealShiftHandover(summaryOrName, maybeScore);
+
+  // история по той же линии — нужна для serviceNote про серии
+  var laneHistory = snap.rows.filter(function(r) { return r.archiveTag === cur.archiveTag; }).slice(0, 4);
+  var nReviews    = laneHistory.filter(function(r) { return r.reviewFlag; }).length;
+  var nMisses     = laneHistory.filter(function(r) { return !r.planClosed; }).length;
+
+  var ranked      = snap.rows.concat(cur).sort(sortBrigadeLedger);
+  var toStore     = ranked.slice(0, ARCHIVE_LIMIT);
+  var pinned      = false;
+
+  if (cur.reviewFlag && nReviews >= 2) {
+    cur.serviceNote = (cur.serviceNote ? cur.serviceNote + "; " : "") + "линия третий раз подряд уходит на ручную сверку";
+  } else if (!cur.reviewFlag && nReviews >= 2) {
+    cur.serviceNote = (cur.serviceNote ? cur.serviceNote + "; " : "") + "линия снята с повторной сверки";
   }
 
-  function readCrewWatchboard() {
-    const archiveSnapshot = openBrigadeJournal();
-
-    if (archiveSnapshot.wasRepaired) {
-      stashBrigadeJournal(archiveSnapshot.rows);
-
-      if (archiveSnapshot.sourceKey !== CREW_LEDGER_KEY) {
-        try {
-          window.localStorage.removeItem(archiveSnapshot.sourceKey);
-        } catch (cleanupError) {}
-      }
-    }
-
-    return archiveSnapshot.rows;
+  if (cur.planClosed && nMisses >= 2) {
+    cur.serviceNote = (cur.serviceNote ? cur.serviceNote + "; " : "") + "участок закрыл план после серии провальных сдач";
   }
 
-  function logShiftToDutyJournal(summaryOrName, maybeScore) {
-    const archiveSnapshot = openBrigadeJournal();
-    const currentRow = sealShiftHandover(summaryOrName, maybeScore);
-    const sameLaneHistory = archiveSnapshot.rows.filter(function (row) {
-      return row.archiveTag === currentRow.archiveTag;
-    }).slice(0, 4);
-    const repeatedHandChecks = sameLaneHistory.filter(function (row) {
-      return row.reviewFlag;
-    }).length;
-    const repeatedPlanMisses = sameLaneHistory.filter(function (row) {
-      return !row.planClosed;
-    }).length;
-    const rankedRows = archiveSnapshot.rows.concat(currentRow).sort(sortBrigadeLedger);
-    let rowsToStore = rankedRows.slice(0, ARCHIVE_LIMIT);
-    let auditRowPinned = false;
-
-    if (currentRow.reviewFlag && repeatedHandChecks >= 2) {
-      currentRow.serviceNote = currentRow.serviceNote
-        ? currentRow.serviceNote + "; линия третий раз подряд уходит на ручную сверку"
-        : "линия третий раз подряд уходит на ручную сверку";
-    } else if (!currentRow.reviewFlag && repeatedHandChecks >= 2) {
-      currentRow.serviceNote = currentRow.serviceNote
-        ? currentRow.serviceNote + "; линия снята с повторной сверки"
-        : "линия снята с повторной сверки";
+  // если review-строка вылетела за ARCHIVE_LIMIT — впихиваем последней,
+  // иначе Ланина не видит флаги и думает что всё хорошо
+  if (cur.reviewFlag) {
+    var inTop = toStore.some(function(r) { return r.entryId === cur.entryId; });
+    if (!inTop && toStore.length) {
+      toStore[toStore.length - 1] = cur;
+      toStore.sort(sortBrigadeLedger);
+      pinned = true;
     }
-
-    if (currentRow.planClosed && repeatedPlanMisses >= 2) {
-      currentRow.serviceNote = currentRow.serviceNote
-        ? currentRow.serviceNote + "; участок закрыл план после серии провальных сдач"
-        : "участок закрыл план после серии провальных сдач";
-    }
-
-    if (currentRow.reviewFlag) {
-      const currentRowInsideArchive = rowsToStore.some(function (row) {
-        return row.entryId === currentRow.entryId;
-      });
-
-      if (!currentRowInsideArchive && rowsToStore.length) {
-        rowsToStore[rowsToStore.length - 1] = currentRow;
-        rowsToStore.sort(sortBrigadeLedger);
-        auditRowPinned = true;
-      }
-    }
-
-    const archiveReceipt = stashBrigadeJournal(rowsToStore);
-    const visibleRows = archiveReceipt.persistedRows.slice(0, 10);
-    const rank = rankedRows.findIndex(function (row) {
-      return row.entryId === currentRow.entryId;
-    }) + 1;
-
-    if (archiveSnapshot.sourceKey !== CREW_LEDGER_KEY) {
-      try {
-        window.localStorage.removeItem(archiveSnapshot.sourceKey);
-      } catch (cleanupError) {}
-    }
-
-    return {
-      top10: visibleRows,
-      rank: rank > 0 ? rank : rankedRows.length + 1,
-      archiveSaved: archiveReceipt.archiveSaved,
-      archiveMode: archiveReceipt.archiveMode,
-      archiveWasRepaired: archiveSnapshot.wasRepaired,
-      removedRows: archiveSnapshot.removedRows + archiveReceipt.rowsSkipped,
-      pickerRow: currentRow,
-      shiftBadge: currentRow.shiftBadge,
-      serviceNote: currentRow.serviceNote,
-      scoreCheck: currentRow.scoreCheck,
-      expectedPoints: currentRow.expectedPoints,
-      reviewFlag: currentRow.reviewFlag,
-      reviewReason: currentRow.reviewReason,
-      shiftBoss: currentRow.shiftBoss,
-      auditDesk: currentRow.auditDesk,
-      auditRowPinned: auditRowPinned,
-      archiveIssue: archiveSnapshot.archiveIssue || archiveReceipt.archiveIssue
-    };
   }
 
-  function pullDutyConsolePrefs() {
-    let storedPrefs = {};
-    let rawPrefs = "";
-    let sourceKey = DISPATCH_PREFS_KEY;
+  var receipt = stashBrigadeJournal(toStore);
+  var rank    = ranked.findIndex(function(r) { return r.entryId === cur.entryId; }) + 1;
 
-    try {
-      rawPrefs = window.localStorage.getItem(DISPATCH_PREFS_KEY) || "";
-    } catch (error) {
-      rawPrefs = "";
-    }
-
-    if (!rawPrefs) {
-      for (let index = 0; index < LEGACY_DISPATCH_PREFS_KEYS.length; index += 1) {
-        try {
-          rawPrefs = window.localStorage.getItem(LEGACY_DISPATCH_PREFS_KEYS[index]) || "";
-        } catch (error) {
-          rawPrefs = "";
-        }
-
-        if (rawPrefs) {
-          sourceKey = LEGACY_DISPATCH_PREFS_KEYS[index];
-          break;
-        }
-      }
-    }
-
-    try {
-      storedPrefs = JSON.parse(rawPrefs || "{}");
-    } catch (error) {
-      storedPrefs = {};
-    }
-
-    const preparedPrefs = {
-      fontSize: Math.max(12, Math.min(22, Number(storedPrefs.fontSize) || 16)),
-      soundEnabled: storedPrefs.soundEnabled !== false,
-      sectorCode: AZOT_SHIFT_BOOK.sectors[storedPrefs.sectorCode] ? storedPrefs.sectorCode : "bulk-lane",
-      brigadeCode: AZOT_SHIFT_BOOK.brigades[storedPrefs.brigadeCode] ? storedPrefs.brigadeCode : "north-3"
-    };
-
-    try {
-      window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(preparedPrefs));
-    } catch (error) {}
-
-    if (sourceKey !== DISPATCH_PREFS_KEY) {
-      try {
-        window.localStorage.removeItem(sourceKey);
-      } catch (cleanupError) {}
-    }
-
-    return preparedPrefs;
+  if (snap.sourceKey !== CREW_LEDGER_KEY) {
+    try { window.localStorage.removeItem(snap.sourceKey); } catch(e) {}
   }
 
-  // Потеря настроек обрабатывается: пульт должен подняться с учетом запуска в инкогнито.
-  function stashDutyConsolePrefs(nextPrefs) {
-    const preparedPrefs = {
-      fontSize: Math.max(12, Math.min(22, Number(nextPrefs && nextPrefs.fontSize) || 16)),
-      soundEnabled: !(nextPrefs && nextPrefs.soundEnabled === false),
-      sectorCode: nextPrefs && AZOT_SHIFT_BOOK.sectors[nextPrefs.sectorCode] ? nextPrefs.sectorCode : "bulk-lane",
-      brigadeCode: nextPrefs && AZOT_SHIFT_BOOK.brigades[nextPrefs.brigadeCode] ? nextPrefs.brigadeCode : "north-3"
-    };
-
-    try {
-      window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(preparedPrefs));
-    } catch (error) {}
-
-    return preparedPrefs;
-  }
-
-  window.AZOTStorage = {
-    pullDutyConsolePrefs: pullDutyConsolePrefs,
-    stashDutyConsolePrefs: stashDutyConsolePrefs,
-    readCrewWatchboard: readCrewWatchboard,
-    logShiftToDutyJournal: logShiftToDutyJournal
+  return {
+    top10:              receipt.persistedRows.slice(0, 10),
+    rank:               rank > 0 ? rank : ranked.length + 1,
+    archiveSaved:       receipt.archiveSaved,
+    archiveMode:        receipt.archiveMode,
+    archiveWasRepaired: snap.wasRepaired,
+    removedRows:        snap.removedRows + receipt.rowsSkipped,
+    pickerRow:          cur,
+    shiftBadge:         cur.shiftBadge,
+    serviceNote:        cur.serviceNote,
+    scoreCheck:         cur.scoreCheck,
+    expectedPoints:     cur.expectedPoints,
+    reviewFlag:         cur.reviewFlag,
+    reviewReason:       cur.reviewReason,
+    shiftBoss:          cur.shiftBoss,
+    auditDesk:          cur.auditDesk,
+    auditRowPinned:     pinned,
+    archiveIssue:       snap.archiveIssue || receipt.archiveIssue
   };
+}
+
+
+function pullDutyConsolePrefs() {
+  var raw = "";
+  var srcKey = DISPATCH_PREFS_KEY;
+
+  try { raw = window.localStorage.getItem(DISPATCH_PREFS_KEY) || ""; } catch(e) {}
+
+  if (!raw) {
+    for (var li = 0; li < LEGACY_DISPATCH_PREFS_KEYS.length; li++) {
+      try { raw = window.localStorage.getItem(LEGACY_DISPATCH_PREFS_KEYS[li]) || ""; } catch(e) {}
+      if (raw) { srcKey = LEGACY_DISPATCH_PREFS_KEYS[li]; break; }
+    }
+  }
+
+  var stored = {};
+  try { stored = JSON.parse(raw || "{}"); } catch(e) {}
+
+  var prefs = {
+    fontSize:    Math.max(12, Math.min(22, Number(stored.fontSize) || 16)),
+    soundEnabled: stored.soundEnabled !== false,
+    sectorCode:  AZOT_SHIFT_BOOK.sectors[stored.sectorCode]   ? stored.sectorCode   : "bulk-lane",
+    brigadeCode: AZOT_SHIFT_BOOK.brigades[stored.brigadeCode]  ? stored.brigadeCode  : "north-3"
+  };
+
+  try { window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+  if (srcKey !== DISPATCH_PREFS_KEY) { try { window.localStorage.removeItem(srcKey); } catch(e) {} }
+
+  return prefs;
+}
+
+function stashDutyConsolePrefs(next) {
+  var prefs = {
+    fontSize:    Math.max(12, Math.min(22, Number(next && next.fontSize) || 16)),
+    soundEnabled: !(next && next.soundEnabled === false),
+    sectorCode:  (next && AZOT_SHIFT_BOOK.sectors[next.sectorCode])   ? next.sectorCode   : "bulk-lane",
+    brigadeCode: (next && AZOT_SHIFT_BOOK.brigades[next.brigadeCode])  ? next.brigadeCode  : "north-3"
+  };
+  try { window.localStorage.setItem(DISPATCH_PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+  return prefs;
+}
+
+
+window.AZOTStorage = {
+  pullDutyConsolePrefs:  pullDutyConsolePrefs,
+  stashDutyConsolePrefs: stashDutyConsolePrefs,
+  readCrewWatchboard:    readCrewWatchboard,
+  logShiftToDutyJournal: logShiftToDutyJournal
+};
+
 })();

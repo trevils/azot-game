@@ -10,7 +10,7 @@
     lineSelect: document.getElementById("azot-sector-code"),
     brigadeSelect: document.getElementById("brigade-call-code"),
     startBtn: document.getElementById("dispatch-shift-btn"),
-    soundBtnDispatch: document.getElementById("dispatch-sound-toggle"),
+    audioBtnDispatch: document.getElementById("dispatch-sound-toggle"),
     fontDecBtn: document.getElementById("dispatch-font-down"),
     fontIncBtn: document.getElementById("dispatch-font-up"),
     canvas: document.getElementById("game-canvas"),
@@ -20,7 +20,7 @@
     scoreBoard: document.getElementById("hud-cargo-score"),
     livesBoard: document.getElementById("hud-fall-limit"),
     pauseBtn: document.getElementById("shift-pause-btn"),
-    soundBtnFloor: document.getElementById("shift-sound-btn"),
+    audioBtnFloor: document.getElementById("shift-sound-btn"),
     endBtn: document.getElementById("handover-shift-btn"),
     pauseOverlay: document.getElementById("forklift-pause-gate"),
     resumeBtn: document.getElementById("resume-shift-btn"),
@@ -104,7 +104,7 @@
   };
 
   const storage = window.AZOTStorage || {};
-  const audio = window.AZOTAudio || {};
+  const audioModule = window.AZOTAudio || {};
   const gameEngine = window.AZOTGame || {};
 
   function normalizeSettings(rawSettings) {
@@ -114,7 +114,7 @@
 
     return {
       fontSize: Math.max(12, Math.min(22, Number(source.fontSize) || 16)),
-      sound: source.sound !== false && source.soundEnabled !== false,
+      audioEnabled: source.audioEnabled !== false && source.sound !== false && source.soundEnabled !== false,
       line: warehouse.lines[line] ? line : "bulk-lane",
       team: warehouse.teams[team] ? team : "north-3"
     };
@@ -125,7 +125,7 @@
 
     return {
       fontSize: Math.max(12, Math.min(22, Number(source.fontSize) || 16)),
-      soundEnabled: source.sound !== false,
+      soundEnabled: source.audioEnabled !== false && source.sound !== false,
       sectorCode: warehouse.lines[source.line] ? source.line : "bulk-lane",
       brigadeCode: warehouse.teams[source.team] ? source.team : "north-3"
     };
@@ -213,17 +213,83 @@
     }
   }
 
-  let settings = loadSettings();
-  let soundEngine = audio.Engine
-    ? new audio.Engine(settings.sound)
-    : {
-        on: !!settings.sound,
-        toggle: function () { this.on = !this.on; return this.on; },
-        play: function () {},
-        init: function () {},
-        startAmbient: function () {},
-        stopAmbient: function () {}
+  function noop() {}
+
+  function createSilentAudioEngine(enabled) {
+    return {
+      on: enabled !== false,
+      toggle: function () {
+        this.on = !this.on;
+        return this.on;
+      },
+      play: noop,
+      init: noop,
+      startBg: noop,
+      stopBg: noop,
+      startAmbient: function () {
+        this.startBg();
+      },
+      stopAmbient: function () {
+        this.stopBg();
+      },
+      setVolume: noop
+    };
+  }
+
+  function normalizeAudioEngine(rawAudioEngine, enabled) {
+    const audioEngine = rawAudioEngine && typeof rawAudioEngine === "object"
+      ? rawAudioEngine
+      : createSilentAudioEngine(enabled);
+    const startBg = typeof audioEngine.startBg === "function"
+      ? audioEngine.startBg.bind(audioEngine)
+      : typeof audioEngine.startAmbient === "function"
+        ? audioEngine.startAmbient.bind(audioEngine)
+        : noop;
+    const stopBg = typeof audioEngine.stopBg === "function"
+      ? audioEngine.stopBg.bind(audioEngine)
+      : typeof audioEngine.stopAmbient === "function"
+        ? audioEngine.stopAmbient.bind(audioEngine)
+        : noop;
+
+    audioEngine.on = enabled !== false && audioEngine.on !== false;
+    if (typeof audioEngine.toggle !== "function") {
+      audioEngine.toggle = function () {
+        this.on = !this.on;
+        return this.on;
       };
+    }
+    if (typeof audioEngine.play !== "function") {
+      audioEngine.play = noop;
+    }
+    if (typeof audioEngine.init !== "function") {
+      audioEngine.init = noop;
+    }
+    if (typeof audioEngine.setVolume !== "function") {
+      audioEngine.setVolume = noop;
+    }
+
+    audioEngine.startBg = startBg;
+    audioEngine.stopBg = stopBg;
+    audioEngine.startAmbient = typeof audioEngine.startAmbient === "function"
+      ? audioEngine.startAmbient.bind(audioEngine)
+      : startBg;
+    audioEngine.stopAmbient = typeof audioEngine.stopAmbient === "function"
+      ? audioEngine.stopAmbient.bind(audioEngine)
+      : stopBg;
+
+    return audioEngine;
+  }
+
+  let settings = loadSettings();
+  let audioEngine = normalizeAudioEngine(
+    typeof audioModule.create === "function"
+      ? audioModule.create(settings.audioEnabled)
+      : audioModule.Engine
+        ? new audioModule.Engine(settings.audioEnabled)
+        : null,
+    settings.audioEnabled
+  );
+  settings.audioEnabled = audioEngine.on !== false;
 
   let currentGame = null;
   let lastWorkerName = "";
@@ -307,25 +373,25 @@
     settings = saveSettings(settings);
   }
 
-  function getSoundLabel() {
-    return settings.sound ? "Звук: вкл" : "Звук: выкл";
+  function getAudioLabel() {
+    return settings.audioEnabled ? "Звук: вкл" : "Звук: выкл";
   }
 
-  function updateSoundButtons() {
-    const label = getSoundLabel();
-    if (ui.soundBtnFloor) {
-      ui.soundBtnFloor.textContent = label;
+  function updateAudioButtons() {
+    const label = getAudioLabel();
+    if (ui.audioBtnFloor) {
+      ui.audioBtnFloor.textContent = label;
     }
-    if (ui.soundBtnDispatch) {
-      ui.soundBtnDispatch.textContent = label;
+    if (ui.audioBtnDispatch) {
+      ui.audioBtnDispatch.textContent = label;
     }
   }
 
-  function beep() {
-    if (!settings.sound || !soundEngine || typeof soundEngine.play !== "function") {
+  function playUiClick() {
+    if (!settings.audioEnabled || !audioEngine || typeof audioEngine.play !== "function") {
       return;
     }
-    soundEngine.play("click");
+    audioEngine.play("click");
   }
 
   function switchScreen(nextScreen) {
@@ -589,13 +655,13 @@
     showPauseOverlay(false);
     switchScreen("game");
 
-    if (soundEngine && typeof soundEngine.init === "function") {
-      soundEngine.init();
+    if (audioEngine && typeof audioEngine.init === "function") {
+      audioEngine.init();
     }
-    beep();
+    playUiClick();
 
     currentGame = new engine(ui.canvas, {
-      audio: soundEngine,
+      audioEngine: audioEngine,
       shiftPassport: shiftPassport,
       shiftInfo: shiftPassport,
       onShiftBoardUpdate: updateHUD,
@@ -719,21 +785,21 @@
 
   function adjustFont(delta) {
     changeFontSize((settings.fontSize || 16) + delta);
-    if (soundEngine && typeof soundEngine.init === "function") {
-      soundEngine.init();
+    if (audioEngine && typeof audioEngine.init === "function") {
+      audioEngine.init();
     }
-    beep();
+    playUiClick();
   }
 
-  function toggleSound() {
-    if (!soundEngine || typeof soundEngine.toggle !== "function") {
-      settings.sound = !settings.sound;
+  function toggleAudio() {
+    if (!audioEngine || typeof audioEngine.toggle !== "function") {
+      settings.audioEnabled = !settings.audioEnabled;
     } else {
-      settings.sound = soundEngine.toggle();
+      settings.audioEnabled = audioEngine.toggle();
     }
 
     settings = saveSettings(settings);
-    updateSoundButtons();
+    updateAudioButtons();
   }
 
   ui.workerInput.addEventListener("input", updateStartButton);
@@ -742,13 +808,13 @@
   ui.lineSelect.addEventListener("change", function () {
     rememberShift();
     updateStartButton();
-    beep();
+    playUiClick();
   });
 
   ui.brigadeSelect.addEventListener("change", function () {
     rememberShift();
     updateStartButton();
-    beep();
+    playUiClick();
   });
 
   if (ui.pauseBtn) {
@@ -757,7 +823,7 @@
         return;
       }
       currentGame.togglePause();
-      beep();
+      playUiClick();
     });
   }
 
@@ -767,7 +833,7 @@
         return;
       }
       currentGame.togglePause();
-      beep();
+      playUiClick();
     });
   }
 
@@ -780,30 +846,30 @@
         currentGame.togglePause();
       }
       currentGame.finishRun();
-      beep();
+      playUiClick();
     });
   }
 
   if (ui.repeatBtn) {
     ui.repeatBtn.addEventListener("click", function () {
-      beep();
+      playUiClick();
       repeatShift();
     });
   }
 
   if (ui.backBtn) {
     ui.backBtn.addEventListener("click", function () {
-      beep();
+      playUiClick();
       backToMenu();
     });
   }
 
-  if (ui.soundBtnFloor) {
-    ui.soundBtnFloor.addEventListener("click", toggleSound);
+  if (ui.audioBtnFloor) {
+    ui.audioBtnFloor.addEventListener("click", toggleAudio);
   }
 
-  if (ui.soundBtnDispatch) {
-    ui.soundBtnDispatch.addEventListener("click", toggleSound);
+  if (ui.audioBtnDispatch) {
+    ui.audioBtnDispatch.addEventListener("click", toggleAudio);
   }
 
   if (ui.fontDecBtn) {
@@ -821,7 +887,7 @@
   window.addEventListener("beforeunload", stopGame);
 
   changeFontSize(settings.fontSize);
-  updateSoundButtons();
+  updateAudioButtons();
   updateStartButton();
   showLedger(null);
 })();
