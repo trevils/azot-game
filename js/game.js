@@ -181,25 +181,53 @@
     };
   }
 
-  // Дефотный noop. Оставлен его после того,
-  // как старые ветки без audio начали валить игру на undefined.play().
+  // Заглушка для сборок без подключенного аудиомодуля.
+  // Вставлен в ответ на старые ветки без audio начали валить игру на undefined.play().
   function noop() {}
+
+  function normalizeAudioCueName(soundId) {
+    switch (soundId) {
+      case 'click':
+        return 'ui_click';
+      case 'jump':
+        return 'worker_jump';
+      case 'pickup':
+        return 'order_pickup';
+      case 'pickupRare':
+        return 'urgent_order_pickup';
+      case 'hit':
+        return 'damage_taken';
+      default:
+        return soundId;
+    }
+  }
 
   function createGameAudioEngine(rawAudioEngine) {
     const source = rawAudioEngine && typeof rawAudioEngine === 'object' ? rawAudioEngine : null;
+    const play = source && typeof source.play === 'function'
+      ? source.play.bind(source)
+      : source && typeof source.playWarehouseSfx === 'function'
+        ? source.playWarehouseSfx.bind(source)
+        : noop;
     const startBg = source && typeof source.startBg === 'function'
       ? source.startBg.bind(source)
       : source && typeof source.startAmbient === 'function'
         ? source.startAmbient.bind(source)
-        : noop;
+        : source && typeof source.runWarehouseAtmosphere === 'function'
+          ? source.runWarehouseAtmosphere.bind(source)
+          : noop;
     const stopBg = source && typeof source.stopBg === 'function'
       ? source.stopBg.bind(source)
       : source && typeof source.stopAmbient === 'function'
         ? source.stopAmbient.bind(source)
-        : noop;
+        : source && typeof source.stopWarehouseAtmosphere === 'function'
+          ? source.stopWarehouseAtmosphere.bind(source)
+          : noop;
 
     return {
-      play: source && typeof source.play === 'function' ? source.play.bind(source) : noop,
+      play: function (soundId) {
+        return play(normalizeAudioCueName(soundId));
+      },
       startBg: startBg,
       stopBg: stopBg
     };
@@ -1124,11 +1152,11 @@
             this.shiftStats.cartOrdinaryLosses += 1;
           }
           if (cargo.type === 'fragile') {
-            this.radioMessage = 'Ущерб: тележка увезла хрупкий груз!';
+            this.radioMessage = 'Ущерб: тележка сбила хрупкий груз!';
           } else if (cargo.type === 'urgent') {
-            this.radioMessage = 'Срочный груз потерян тележке';
+            this.radioMessage = 'Срочный груз потерян из-за тележки';
           } else {
-            this.radioMessage = 'Груз потеряна тележкой';
+            this.radioMessage = 'Груз сбит тележкой';
           }
           this.radioMessageTimer = 0.85;
           this.postDockStamp(cargo.x, cargo.y, '-' + penalty);
