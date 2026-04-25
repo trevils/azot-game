@@ -173,4 +173,16 @@
   AzotWarehouseAudioManager.prototype.setMasterVolume = function (value) {
     this.masterVolume = value < 0 ? 0 : value > 1 ? 1 : value;
   };
+
+  // Экспортируем менеджер в несколько ожидаемых глобальных имён,
+  // чтобы старые и новые версии UI увидели один и тот же аудио API.
+  window.AZOTAudioManager = AzotWarehouseAudioManager;
+  window.AZOTWarehouseAudioManager = AzotWarehouseAudioManager;
+  window.AzotWarehouseAudioManager = AzotWarehouseAudioManager;
+  window.AZOTWarehouseAudio = {
+    create: function (defaultState) {
+      return new AzotWarehouseAudioManager(defaultState);
+    },
+    AudioManager: AzotWarehouseAudioManager
+  };
 })();

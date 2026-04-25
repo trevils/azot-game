@@ -47,7 +47,7 @@ var AZOT_SHIFT_BOOK = {
       label: "Экспресс-ворота", shortLabel: "Экспресс",
       boardTag: "EXP-04", zoneTag: "EXP",
       supervisor: "Диспетчер Климов",
-      incidentLimit: 60,    // у него своя статистика срывов
+      incidentLimit: 80,    // у него своя статистика срывов
       targetPoints: 180, reviewFloor: 110,
       shiftRule:        "не сорвать срочные окна",
       shiftRoute:       "стол Климова",
@@ -62,7 +62,7 @@ var AZOT_SHIFT_BOOK = {
       label: "Хрупкий ряд", shortLabel: "Хрупкий",
       boardTag: "FRG-09", zoneTag: "FRG",
       supervisor: "Контролер Ланина",
-      incidentLimit: 30,   // не баг. хрупкому инцидент это катастрофа
+      incidentLimit: 30,   // хрупкому товару такой инцидент это катастрофа
       targetPoints: 150, reviewFloor: 85,
       shiftRule:        "сдать хрупкий товар без боя",
       shiftRoute:       "контрольный стол Ланиной",

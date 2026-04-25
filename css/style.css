@@ -41,7 +41,7 @@ body {
   min-height: 100%;
   display: grid;
   place-items: start center;
-  padding: 8px 24px 24px;
+  padding: 0 24px 24px;
 }
 
 .azot-mainframe {
@@ -115,7 +115,7 @@ body {
   row-gap: 16px;
   width: 688px;
   height: 690px;
-  margin: 32px 0 0 52px;
+  margin: 16px 0 0 52px;
   padding: 30px 24px 16px;
   overflow: hidden;
   background:
@@ -564,7 +564,7 @@ body {
   .dispatch-console {
     width: min(700px, calc(100% - 32px));
     height: auto;
-    margin: 24px auto 0;
+    margin: 16px auto 0;
     padding: 34px 16px 18px;
   }
 
